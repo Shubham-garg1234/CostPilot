@@ -1,0 +1,16 @@
+node_modules
+.next
+dist
+coverage
+.turbo
+.env
+.env.local
+.env.*.local
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+*.log
+tmp
+generated
+apps/api/generated
+

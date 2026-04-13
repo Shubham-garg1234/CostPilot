@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleKey {
+  ADMIN
+  MANAGER
+  SDE1
+  SDE2
+  INTERN
+}
+
+enum ViolationAction {
+  BLOCK
+  WARN
+  THROTTLE
+}
+
+enum ViolationType {
+  TOKEN_LIMIT
+  REQUEST_LIMIT
+  COST_LIMIT
+  MODEL_RESTRICTED
+  FEATURE_LOCKED
+  CATEGORY_LOCKED
+  TEMP_BAN
+}
+
+enum BillingStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+}
+
+model Organization {
+  id               String               @id @default(cuid())
+  name             String
+  slug             String               @unique
+  stripeCustomerId String?              @unique
+  monthlyBudgetUsd Decimal?             @db.Decimal(12, 2)
+  markupPercentage Decimal              @default(0) @db.Decimal(5, 2)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  teams            Team[]
+  users            User[]
+  policies         Policy[]
+  violations       Violation[]
+  billingRecords   BillingRecord[]
+  usageAggregates  UsageAggregate[]
+  apiKeys          OrganizationApiKey[]
+}
+
+model Team {
+  id              String           @id @default(cuid())
+  name            String
+  departmentCode  String?
+  organizationId  String
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users           User[]
+  usageAggregates UsageAggregate[]
+
+  @@unique([organizationId, name])
+}
+
+model User {
+  id              String           @id @default(cuid())
+  clerkUserId     String           @unique
+  email           String           @unique
+  fullName        String
+  organizationId  String
+  teamId          String?
+  role            RoleKey
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team            Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  violations      Violation[]
+  usageAggregates UsageAggregate[]
+}
+
+model Policy {
+  id                 String           @id @default(cuid())
+  orgId              String
+  role               RoleKey
+  category           String
+  feature            String?
+  maxTokensPerDay    Int?
+  maxRequestsPerHour Int?
+  maxCostPerMonthUsd Decimal?         @db.Decimal(12, 2)
+  allowedModels      String[]
+  disabled           Boolean          @default(false)
+  cooldownMinutes    Int              @default(0)
+  featureLocked      Boolean          @default(false)
+  actionOnViolation  ViolationAction
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  organization       Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, role, category, feature])
+}
+
+model Violation {
+  id           String           @id @default(cuid())
+  orgId        String
+  userId       String
+  role         RoleKey
+  category     String
+  feature      String?
+  model        String
+  type         ViolationType
+  actionTaken  ViolationAction
+  message      String
+  metadata     Json?
+  createdAt    DateTime         @default(now())
+  organization Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model UsageAggregate {
+  id               String        @id @default(cuid())
+  orgId            String
+  userId           String?
+  teamId           String?
+  role             RoleKey?
+  dayBucket        DateTime
+  hourBucket       DateTime?
+  monthBucket      DateTime
+  category         String
+  feature          String?
+  model            String
+  promptTokens     Int           @default(0)
+  completionTokens Int           @default(0)
+  totalTokens      Int           @default(0)
+  requestCount     Int           @default(0)
+  costUsd          Decimal       @default(0) @db.Decimal(12, 4)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  organization     Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user             User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  team             Team?         @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, dayBucket])
+  @@index([userId, dayBucket])
+  @@index([teamId, dayBucket])
+}
+
+model BillingRecord {
+  id               String         @id @default(cuid())
+  orgId            String
+  periodStart      DateTime
+  periodEnd        DateTime
+  rawCostUsd       Decimal        @db.Decimal(12, 4)
+  markupPercentage Decimal        @db.Decimal(5, 2)
+  finalCostUsd     Decimal        @db.Decimal(12, 4)
+  stripeInvoiceId  String?
+  status           BillingStatus  @default(DRAFT)
+  createdAt        DateTime       @default(now())
+  organization     Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, periodStart, periodEnd])
+}
+
+model OrganizationApiKey {
+  id           String        @id @default(cuid())
+  orgId        String
+  name         String
+  encryptedKey String
+  createdAt    DateTime      @default(now())
+  organization Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
