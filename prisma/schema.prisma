@@ -38,6 +38,26 @@ enum BillingStatus {
   VOID
 }
 
+enum UsageSource {
+  SDK
+  CURSOR
+  CHROME_EXTENSION
+  COPILOT
+  CLAUDE
+  CODEX
+  MCP
+  OTHER
+}
+
+enum IntegrationType {
+  PROXY
+  MCP
+  EXTENSION
+  DIRECT
+  IMPORT
+  OBSERVABILITY
+}
+
 model Organization {
   id               String               @id @default(cuid())
   name             String
@@ -52,6 +72,7 @@ model Organization {
   policies         Policy[]
   violations       Violation[]
   billingRecords   BillingRecord[]
+  usageEvents      UsageEvent[]
   usageAggregates  UsageAggregate[]
   apiKeys          OrganizationApiKey[]
 }
@@ -63,6 +84,7 @@ model Team {
   organizationId  String
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   users           User[]
+  usageEvents     UsageEvent[]
   usageAggregates UsageAggregate[]
 
   @@unique([organizationId, name])
@@ -81,6 +103,7 @@ model User {
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   team            Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
   violations      Violation[]
+  usageEvents     UsageEvent[]
   usageAggregates UsageAggregate[]
 }
 
@@ -125,17 +148,57 @@ model Violation {
   @@index([userId, createdAt])
 }
 
+model UsageEvent {
+  id               String           @id @default(cuid())
+  requestId        String?          @unique
+  orgId            String
+  userId           String?
+  teamId           String?
+  role             RoleKey?
+  source           UsageSource      @default(SDK)
+  integrationType  IntegrationType  @default(PROXY)
+  workspaceId      String?
+  sessionId        String?
+  category         String
+  feature          String?
+  provider         String
+  model            String
+  status           String           @default("success")
+  promptTokens     Int              @default(0)
+  completionTokens Int              @default(0)
+  totalTokens      Int              @default(0)
+  costUsd          Decimal          @default(0) @db.Decimal(12, 4)
+  metadata         Json?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  organization     Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user             User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  team             Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+  @@index([userId, createdAt])
+  @@index([teamId, createdAt])
+  @@index([orgId, source, createdAt])
+  @@index([orgId, category, createdAt])
+}
+
 model UsageAggregate {
   id               String        @id @default(cuid())
   orgId            String
   userId           String?
   teamId           String?
   role             RoleKey?
+  source           UsageSource   @default(SDK)
+  integrationType  IntegrationType @default(PROXY)
+  workspaceId      String?
+  sessionId        String?
   dayBucket        DateTime
   hourBucket       DateTime?
   monthBucket      DateTime
   category         String
   feature          String?
+  provider         String        @default("openai")
   model            String
   promptTokens     Int           @default(0)
   completionTokens Int           @default(0)
@@ -151,6 +214,7 @@ model UsageAggregate {
   @@index([orgId, dayBucket])
   @@index([userId, dayBucket])
   @@index([teamId, dayBucket])
+  @@index([orgId, source, dayBucket])
 }
 
 model BillingRecord {
@@ -177,4 +241,3 @@ model OrganizationApiKey {
   createdAt    DateTime      @default(now())
   organization Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
-

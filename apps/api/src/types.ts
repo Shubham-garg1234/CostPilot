@@ -2,7 +2,7 @@ import type { Queue } from "bullmq";
 import type { ClickHouse } from "clickhouse";
 import type Redis from "ioredis";
 import type Stripe from "stripe";
-import type { PrismaClient, RoleKey } from "@prisma/client";
+import type { IntegrationType, PrismaClient, RoleKey, UsageSource } from "@prisma/client";
 
 export type AuthContext = {
   userId: string;
@@ -21,6 +21,43 @@ export type LlmProxyRequest = {
   feature?: string;
   metadata?: Record<string, unknown>;
   provider?: "openai" | "anthropic" | "gemini";
+  source?:
+    | "sdk"
+    | "cursor"
+    | "chrome_extension"
+    | "copilot"
+    | "claude"
+    | "codex"
+    | "mcp"
+    | "other";
+  integrationType?: "proxy" | "mcp" | "extension" | "direct" | "import" | "observability";
+  workspaceId?: string;
+  sessionId?: string;
+  requestId?: string;
+  status?: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type UsageEventInput = {
+  auth: AuthContext;
+  provider: "openai" | "anthropic" | "gemini";
+  model: string;
+  category: string;
+  feature?: string;
+  source: UsageSource;
+  integrationType: IntegrationType;
+  workspaceId?: string;
+  sessionId?: string;
+  requestId?: string;
+  status: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  metadata?: Record<string, unknown>;
+  startedAt?: Date;
+  completedAt?: Date;
 };
 
 export type UsageSnapshot = {

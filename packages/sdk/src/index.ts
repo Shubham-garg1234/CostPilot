@@ -6,6 +6,14 @@ export type TrackLLMInput = {
   role?: string;
   model?: string;
   provider?: "openai" | "anthropic" | "gemini";
+  source?: "sdk" | "cursor" | "chrome_extension" | "copilot" | "claude" | "codex" | "mcp" | "other";
+  integrationType?: "proxy" | "mcp" | "extension" | "direct" | "import" | "observability";
+  workspaceId?: string;
+  sessionId?: string;
+  requestId?: string;
+  status?: string;
+  startedAt?: string;
+  completedAt?: string;
   metadata?: Record<string, unknown>;
   prompt: string;
 };
@@ -22,7 +30,11 @@ export async function trackLLM(input: TrackLLMInput, options: TrackLLMOptions) {
       "Content-Type": "application/json",
       ...(options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {})
     },
-    body: JSON.stringify(input)
+    body: JSON.stringify({
+      ...input,
+      source: input.source ?? "sdk",
+      integrationType: input.integrationType ?? "proxy"
+    })
   });
 
   if (!response.ok) {

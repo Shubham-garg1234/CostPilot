@@ -6,6 +6,7 @@ import { registerPolicyRoutes } from "./routes/policies.js";
 import { registerBillingRoutes } from "./routes/billing.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerOrganizationRoutes } from "./routes/organizations.js";
+import { registerUsageEventRoutes } from "./routes/usage-events.js";
 
 export async function buildApp() {
   const app = Fastify({
@@ -23,6 +24,7 @@ export async function buildApp() {
   await registerAuthRoutes(app);
   await registerOrganizationRoutes(app);
   await registerLlmProxyRoutes(app);
+  await registerUsageEventRoutes(app);
   await registerDashboardRoutes(app);
   await registerPolicyRoutes(app);
   await registerBillingRoutes(app);

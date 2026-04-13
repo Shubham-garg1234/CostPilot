@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticate } from "../auth.js";
+import { serializeUsageSource } from "../services/usage-source.js";
 
 export async function registerDashboardRoutes(app: FastifyInstance) {
   app.get("/api/dashboard/summary", { preHandler: [authenticate] }, async (request) => {
@@ -16,28 +17,53 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         topFeatures: [
           { feature: "auto_reply", category: "email_generation", costUsd: 1210.54, tokens: 6400000 }
         ],
+        sourceBreakdown: [
+          { source: "sdk", costUsd: 3910, tokens: 12800000, requests: 32100 },
+          { source: "cursor", costUsd: 5440, tokens: 17400000, requests: 50110 },
+          { source: "codex", costUsd: 1852, tokens: 6200000, requests: 22820 }
+        ],
+        providerBreakdown: [
+          { provider: "openai", costUsd: 7920, tokens: 28400000, requests: 77000 },
+          { provider: "anthropic", costUsd: 3310, tokens: 9700000, requests: 29800 }
+        ],
         recentViolations: []
       };
     }
 
-    const [orgTotals, topUsers, topFeatures, recentViolations] = await Promise.all([
+    const where = { orgId: request.auth.orgId };
+
+    const [orgTotals, topUsers, topFeatures, sourceBreakdown, providerBreakdown, recentViolations] = await Promise.all([
       app.prisma.usageAggregate.aggregate({
-        where: { orgId: request.auth.orgId },
+        where,
         _sum: { totalTokens: true, costUsd: true, requestCount: true }
       }),
       app.prisma.usageAggregate.findMany({
-        where: { orgId: request.auth.orgId },
+        where,
         take: 5,
         orderBy: { costUsd: "desc" },
         include: { user: true }
       }),
       app.prisma.usageAggregate.findMany({
-        where: { orgId: request.auth.orgId },
+        where,
         take: 5,
         orderBy: { totalTokens: "desc" }
       }),
+      app.prisma.usageEvent.groupBy({
+        by: ["source"],
+        where,
+        _sum: { totalTokens: true, costUsd: true },
+        _count: { _all: true },
+        orderBy: { _sum: { costUsd: "desc" } }
+      }),
+      app.prisma.usageEvent.groupBy({
+        by: ["provider"],
+        where,
+        _sum: { totalTokens: true, costUsd: true },
+        _count: { _all: true },
+        orderBy: { _sum: { costUsd: "desc" } }
+      }),
       app.prisma.violation.findMany({
-        where: { orgId: request.auth.orgId },
+        where,
         take: 8,
         orderBy: { createdAt: "desc" }
       })
@@ -67,13 +93,28 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         role: entry.role,
         category: entry.category,
         costUsd: Number(entry.costUsd),
-        tokens: entry.totalTokens
+        tokens: entry.totalTokens,
+        source: serializeUsageSource(entry.source)
       })),
       topFeatures: topFeatures.map((entry) => ({
         feature: entry.feature ?? "Unspecified",
         category: entry.category,
         costUsd: Number(entry.costUsd),
-        tokens: entry.totalTokens
+        tokens: entry.totalTokens,
+        provider: entry.provider,
+        source: serializeUsageSource(entry.source)
+      })),
+      sourceBreakdown: sourceBreakdown.map((entry) => ({
+        source: serializeUsageSource(entry.source),
+        costUsd: Number(entry._sum.costUsd ?? 0),
+        tokens: entry._sum.totalTokens ?? 0,
+        requests: entry._count._all
+      })),
+      providerBreakdown: providerBreakdown.map((entry) => ({
+        provider: entry.provider,
+        costUsd: Number(entry._sum.costUsd ?? 0),
+        tokens: entry._sum.totalTokens ?? 0,
+        requests: entry._count._all
       })),
       recentViolations
     };

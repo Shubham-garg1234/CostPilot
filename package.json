@@ -6,6 +6,7 @@
   "scripts": {
     "dev:web": "pnpm --filter @costpilot/web dev",
     "dev:api": "pnpm --filter @costpilot/api dev",
+    "dev:mcp": "pnpm --filter @costpilot/mcp dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",

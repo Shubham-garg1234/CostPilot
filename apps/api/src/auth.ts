@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { createClerkClient, verifyToken } from "@clerk/backend";
 import { RoleKey } from "@prisma/client";
 
 const fallbackSeedUsers: Record<
@@ -31,6 +32,10 @@ const fallbackSeedUsers: Record<
   }
 };
 
+const clerkClient = createClerkClient({
+  secretKey: process.env.CLERK_SECRET_KEY ?? "sk_test_placeholder"
+});
+
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
   const authMode = (process.env.AUTH_MODE ?? "demo") as "demo" | "clerk";
 
@@ -39,11 +44,31 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     return;
   }
 
-  const authHeader = request.headers.authorization?.replace("Bearer ", "");
-  const dbUser = authHeader && request.server.prisma
+  const token = extractBearerToken(request);
+  if (!token) {
+    return reply.status(401).send({ message: "Missing Clerk bearer token." });
+  }
+
+  const verified = await verifyClerkToken(token);
+  if (!verified?.sub) {
+    return reply.status(401).send({ message: "Invalid Clerk session token." });
+  }
+
+  const clerkUserId = verified.sub;
+  const clerkUser = await clerkClient.users.getUser(clerkUserId).catch(() => null);
+  const primaryEmail =
+    clerkUser?.primaryEmailAddressId
+      ? clerkUser.emailAddresses.find((entry) => entry.id === clerkUser.primaryEmailAddressId)?.emailAddress
+      : clerkUser?.emailAddresses[0]?.emailAddress;
+  const fullName = [clerkUser?.firstName, clerkUser?.lastName].filter(Boolean).join(" ").trim();
+
+  const dbUser = request.server.prisma
     ? await request.server.prisma.user.findFirst({
         where: {
-          OR: [{ clerkUserId: authHeader }, { email: authHeader }]
+          OR: [
+            { clerkUserId },
+            ...(primaryEmail ? [{ email: primaryEmail }] : [])
+          ]
         },
         include: {
           team: true,
@@ -52,20 +77,21 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       }).catch(() => null)
     : null;
 
-  if (dbUser) {
-    request.auth = {
-      userId: dbUser.id,
-      orgId: dbUser.organizationId,
-      role: dbUser.role,
-      authMode: "clerk",
-      teamId: dbUser.teamId,
-      email: dbUser.email,
-      name: dbUser.fullName
-    };
-    return;
+  if (!dbUser) {
+    return reply.status(403).send({
+      message: "Clerk user is valid but not linked to a CostPilot user record."
+    });
   }
 
-  return reply.status(401).send({ message: "Missing or invalid Clerk user." });
+  request.auth = {
+    userId: dbUser.id,
+    orgId: dbUser.organizationId,
+    role: dbUser.role,
+    authMode: "clerk",
+    teamId: dbUser.teamId,
+    email: dbUser.email ?? primaryEmail,
+    name: dbUser.fullName || fullName || clerkUser?.username || clerkUserId
+  };
 }
 
 async function resolveDemoAuth(request: FastifyRequest) {
@@ -103,6 +129,32 @@ async function resolveDemoAuth(request: FastifyRequest) {
         teamId: typeof headerTeamId === "string" ? headerTeamId : seedAuth.teamId,
         authMode: "demo" as const
       };
+}
+
+function extractBearerToken(request: FastifyRequest) {
+  const header = request.headers.authorization;
+  if (!header) {
+    return "";
+  }
+
+  return header.replace("Bearer ", "").trim();
+}
+
+async function verifyClerkToken(token: string) {
+  try {
+    const authorizedParties = (process.env.CLERK_AUTHORIZED_PARTIES ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    return await verifyToken(token, {
+      secretKey: process.env.CLERK_SECRET_KEY ?? "sk_test_placeholder",
+      jwtKey: process.env.CLERK_JWT_KEY,
+      authorizedParties: authorizedParties.length > 0 ? authorizedParties : undefined
+    });
+  } catch {
+    return null;
+  }
 }
 
 function parseDemoToken(token: string) {

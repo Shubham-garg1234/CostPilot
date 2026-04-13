@@ -1,54 +1,328 @@
 # CostPilot AI
 
-CostPilot AI is a production-oriented full-stack SaaS starter for governed LLM usage. It combines an LLM proxy, RBAC-aware policy enforcement, Redis-backed quota tracking, billing primitives, and an executive dashboard to give organizations control over token spend.
+CostPilot AI is a full-stack control plane for AI usage tracking, proxying, spend visibility, and policy enforcement. It can sit in front of model providers as a governed proxy, ingest direct usage events from tools that cannot be fully proxied, and expose an MCP server so editors and agents can report usage into the same system.
 
-## Included
+This repo now supports:
 
-- Next.js App Router frontend with admin, alerts, policy, and billing views
-- Fastify backend with `POST /api/llm-proxy` enforcement middleware
-- PostgreSQL data model via Prisma for orgs, teams, users, policies, violations, aggregates, billing, and encrypted API keys
-- Redis counters for daily tokens, hourly requests, monthly cost, cooldowns, and temporary bans
-- ClickHouse and BullMQ scaffolding for high-volume analytics logging
-- Stripe-ready billing service and optimization hint engine
-- Simple SDK with `trackLLM()` to route governed requests through the proxy
+- LLM proxying through `POST /api/llm-proxy`
+- raw source-aware usage event ingestion through `POST /api/usage-events`
+- usage breakdowns by `source`, `provider`, `category`, `feature`, `workspace`, and `session`
+- demo auth and Clerk-backed auth
+- a local MCP server package for Cursor and other MCP-capable tools
+- a Next.js dashboard for spend, policy, and operational views
 
-## Structure
+## Architecture
+
+CostPilot is built around one normalized usage model:
+
+- `provider`: the upstream model vendor like OpenAI, Anthropic, or Gemini
+- `source`: where the usage came from like `cursor`, `codex`, `claude`, `copilot`, `chrome_extension`, `sdk`
+- `category`: the business workflow like `chat`, `code_generation`, `research`
+- `feature`: the product surface like `assistant`, `autocomplete`, `review`, `sidebar`
+- `workspaceId`, `sessionId`, `requestId`: correlation fields for editor and agent sessions
+
+There are two ingestion paths:
+
+1. Proxy path
+- the client sends prompt + model + metadata to CostPilot
+- CostPilot enforces policy, calculates spend, records a raw `UsageEvent`, writes aggregate rows, and returns the model response
+
+2. Direct event path
+- the client already performed the model call or only has observability data
+- the client sends token and spend metadata to `POST /api/usage-events`
+- CostPilot records the event in the same schema so dashboards and reports stay unified
+
+## Monorepo Structure
 
 ```text
 apps/
-  api/        Fastify API, policy engine, quota enforcement, billing, dashboard endpoints
-  web/        Next.js dashboard and management UI
+  api/        Fastify API, auth, policy engine, proxy routes, usage event routes
+  web/        Next.js dashboard
 packages/
-  sdk/        Developer SDK for tracked LLM calls
-prisma/       Database schema and seed data
+  sdk/        Simple client SDK for tracked proxy requests
+  mcp/        Local MCP server that forwards tool calls to CostPilot API
+prisma/       Prisma schema and seed data
 ```
 
-## Local setup
+## What Was Added
 
-1. Copy `.env.example` to `.env`.
-2. Start infrastructure with `docker-compose up -d`.
-3. Install dependencies with `pnpm install`.
-4. Run `pnpm prisma:generate` and `pnpm prisma:migrate`.
-5. Seed demo data with `pnpm prisma:seed`.
-6. Start the apps with `pnpm dev:api` and `pnpm dev:web`.
+This repo now includes the foundation for multi-tool tracking:
 
-## Governed proxy example
+- `UsageEvent` raw event storage in Prisma
+- `source` and `integrationType` on aggregate records
+- source-aware dashboard summaries
+- `POST /api/usage-events`
+- `GET /api/usage-events/summary`
+- `GET /api/usage-events/recent`
+- source metadata support in the SDK and proxy route
+- a local MCP server in `packages/mcp`
+- real Clerk token verification in the API instead of simple bearer string matching
+
+## Local Setup
+
+### 1. Install and configure
+
+```bash
+cp .env.example .env
+docker-compose up -d
+pnpm install
+```
+
+### 2. Required environment variables
+
+`.env.example` includes:
+
+```env
+AUTH_MODE="demo"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/costpilot"
+REDIS_URL="redis://localhost:6379"
+CLICKHOUSE_URL="http://localhost:8123"
+CLICKHOUSE_USERNAME="default"
+CLICKHOUSE_PASSWORD=""
+CLICKHOUSE_DATABASE="costpilot"
+STRIPE_SECRET_KEY="sk_test_xxx"
+STRIPE_WEBHOOK_SECRET="whsec_xxx"
+CLERK_SECRET_KEY="sk_test_xxx"
+CLERK_JWT_KEY="-----BEGIN PUBLIC KEY-----..."
+CLERK_PUBLISHABLE_KEY="pk_test_xxx"
+CLERK_AUTHORIZED_PARTIES="http://localhost:3000,http://localhost:4000"
+LLM_PROVIDER_API_KEY="provider_key"
+ENCRYPTION_KEY="32_character_encryption_key_here"
+SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+EMAIL_FROM="alerts@costpilot.ai"
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+NEXT_PUBLIC_API_URL="http://localhost:4000"
+```
+
+### 3. Prepare the database
+
+```bash
+pnpm prisma:generate
+pnpm prisma:migrate
+pnpm prisma:seed
+```
+
+The Prisma schema now stores both:
+
+- `UsageEvent`: immutable raw usage records
+- `UsageAggregate`: query-friendly summary rows
+
+### 4. Start the apps
+
+```bash
+pnpm dev:api
+pnpm dev:web
+```
+
+Optional:
+
+```bash
+pnpm dev:mcp
+```
+
+## Authentication
+
+CostPilot supports two auth modes.
+
+### Demo mode
+
+Use this for local development without Clerk:
+
+```env
+AUTH_MODE=demo
+```
+
+Use one of these bearer tokens:
+
+- `demo-admin`
+- `demo-manager`
+- `demo-intern`
+
+You can also generate a demo token using `POST /api/auth/demo-login`.
+
+### Clerk mode
+
+Use this for production-like auth:
+
+```env
+AUTH_MODE=clerk
+CLERK_SECRET_KEY=sk_live_or_test_xxx
+CLERK_JWT_KEY=your_clerk_jwt_public_key
+CLERK_PUBLISHABLE_KEY=pk_live_or_test_xxx
+CLERK_AUTHORIZED_PARTIES=http://localhost:3000,http://localhost:4000
+```
+
+How Clerk auth works in this repo:
+
+1. The API reads the bearer token.
+2. CostPilot verifies it with Clerk using `verifyToken()`.
+3. It resolves the Clerk user id from the token `sub`.
+4. It loads the Clerk user profile.
+5. It links that identity to a CostPilot `User` row by `clerkUserId` or email.
+
+Important:
+
+- a valid Clerk session token is not enough by itself
+- the user must also exist in CostPilot's database
+- the `users.clerkUserId` column should match the Clerk user id
+
+You can create linked users through the API:
+
+```bash
+curl -X POST http://localhost:4000/api/users \
+  -H "Authorization: Bearer demo-admin" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "YOUR_ORG_ID",
+    "email": "user@example.com",
+    "fullName": "Example User",
+    "role": "ADMIN",
+    "clerkUserId": "user_2abc123"
+  }'
+```
+
+In production, the common pattern is:
+
+- create the Clerk user in Clerk
+- create or sync the matching CostPilot user row
+- send the Clerk session token to CostPilot-protected API routes
+
+## Proxying Requests Through CostPilot
+
+`POST /api/llm-proxy` is the governed path. It handles:
+
+- auth
+- policy checks
+- throttling and warnings
+- provider dispatch
+- token estimation
+- cost calculation
+- usage event persistence
+- aggregate persistence
+
+Example request:
+
+```bash
+curl -X POST http://localhost:4000/api/llm-proxy \
+  -H "Authorization: Bearer demo-admin" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Summarize this PR and suggest review comments.",
+    "model": "gpt-4o-mini",
+    "provider": "openai",
+    "category": "code_generation",
+    "feature": "assistant",
+    "source": "cursor",
+    "integrationType": "proxy",
+    "workspaceId": "costpilot-main",
+    "sessionId": "cursor-session-001",
+    "requestId": "req-001",
+    "metadata": {
+      "fileCount": 4,
+      "branch": "main"
+    }
+  }'
+```
+
+Example response shape:
 
 ```json
 {
-  "prompt": "Draft a support reply for this refund request",
-  "model": "gpt-4o-mini",
-  "category": "email_generation",
-  "feature": "auto_reply",
-  "metadata": {
-    "ticketId": "SUP-1023"
+  "status": "ok",
+  "enforcement": "allow",
+  "usage": {
+    "promptTokens": 120,
+    "completionTokens": 240,
+    "totalTokens": 360,
+    "costUsd": 0.000162,
+    "source": "cursor",
+    "integrationType": "proxy"
+  },
+  "response": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "output": "..."
   }
 }
 ```
 
-Use `Authorization: Bearer demo-admin`, `demo-manager`, or `demo-intern` for the seeded demo users.
+Use the proxy when:
 
-## SDK example
+- you control the model request
+- you want policy enforcement
+- you want the most accurate token and spend attribution in CostPilot
+
+## Ingesting External Usage Events
+
+Some tools cannot be fully proxied. For those, send usage telemetry to `POST /api/usage-events`.
+
+Example:
+
+```bash
+curl -X POST http://localhost:4000/api/usage-events \
+  -H "Authorization: Bearer demo-admin" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-7-sonnet",
+    "provider": "anthropic",
+    "category": "chat",
+    "feature": "assistant",
+    "source": "claude",
+    "integrationType": "observability",
+    "workspaceId": "project-alpha",
+    "sessionId": "claude-session-44",
+    "requestId": "claude-req-44",
+    "promptTokens": 950,
+    "completionTokens": 410,
+    "metadata": {
+      "surface": "desktop-app"
+    }
+  }'
+```
+
+Use the direct event endpoint when:
+
+- the upstream request already happened elsewhere
+- you only have self-reported or observed token data
+- you still want unified reporting and cost categorization
+
+## Usage Query APIs
+
+### `GET /api/usage-events/summary`
+
+Use this for totals and grouped reporting.
+
+Supported query params:
+
+- `days`
+- `source`
+- `category`
+- `provider`
+
+Example:
+
+```bash
+curl "http://localhost:4000/api/usage-events/summary?days=14&source=cursor" \
+  -H "Authorization: Bearer demo-admin"
+```
+
+### `GET /api/usage-events/recent`
+
+Returns the latest raw events for the current organization.
+
+### `GET /api/dashboard/summary`
+
+Returns dashboard cards plus:
+
+- `sourceBreakdown`
+- `providerBreakdown`
+- top users
+- top features
+- recent violations
+
+## SDK Usage
+
+The SDK wraps the proxy endpoint.
 
 ```ts
 import { trackLLM } from "@costpilot/sdk";
@@ -59,8 +333,14 @@ await trackLLM(
     orgId: "org_123",
     category: "chat",
     feature: "assistant",
-    prompt: "Summarize this incident review",
-    model: "gpt-4o-mini"
+    prompt: "Summarize this incident review.",
+    model: "gpt-4o-mini",
+    provider: "openai",
+    source: "cursor",
+    integrationType: "proxy",
+    workspaceId: "repo-costpilot",
+    sessionId: "cursor-session-22",
+    requestId: "req-22"
   },
   {
     apiUrl: "http://localhost:4000",
@@ -69,20 +349,163 @@ await trackLLM(
 );
 ```
 
-## Implemented governance patterns
+The SDK now defaults to:
 
-- Role-based model restrictions
-- Feature locking for sensitive workflows
-- Hourly, daily, and monthly quota checks
-- Cooldown windows after repeated abuse
-- Exponential backoff for throttled requests
-- Violation records and alert hooks
-- Optimization hints for wasteful prompt usage
+- `source: "sdk"`
+- `integrationType: "proxy"`
 
-## Next upgrades
+when those values are not supplied.
 
-- Replace demo auth with Clerk middleware and verified org membership
-- Attach a real OpenAI-compatible upstream provider in the proxy
-- Add ClickHouse worker consumers for queue-backed log ingestion
-- Swap static dashboard cards for live API-backed React Server Components
-- Expand Stripe usage metering and invoice finalization webhooks
+## MCP Server
+
+The MCP server lives in `packages/mcp` and forwards MCP tool calls into the CostPilot API.
+
+### Start it locally
+
+```bash
+set COSTPILOT_API_URL=http://127.0.0.1:4000
+set COSTPILOT_API_KEY=demo-admin
+pnpm dev:mcp
+```
+
+On macOS/Linux:
+
+```bash
+export COSTPILOT_API_URL=http://127.0.0.1:4000
+export COSTPILOT_API_KEY=demo-admin
+pnpm dev:mcp
+```
+
+### MCP tools exposed
+
+- `track_usage_event`
+- `get_usage_summary`
+- `get_budget_status`
+- `list_policies`
+
+### Cursor integration
+
+Cursor supports MCP servers through its MCP config. On Windows, a typical setup looks like:
+
+```json
+{
+  "mcpServers": {
+    "costpilot": {
+      "command": "pnpm.cmd",
+      "args": ["--dir", "C:\\Users\\Shubham\\Desktop\\CostPilot", "dev:mcp"],
+      "env": {
+        "COSTPILOT_API_URL": "http://127.0.0.1:4000",
+        "COSTPILOT_API_KEY": "demo-admin"
+      }
+    }
+  }
+}
+```
+
+What this gives you:
+
+- Cursor can call CostPilot MCP tools directly
+- usage events can be reported with `source: "cursor"`
+- policy and budget summaries can be pulled into the editor
+
+Recommended Cursor tracking modes:
+
+1. Best mode: proxy actual model traffic through `POST /api/llm-proxy`
+2. Fallback mode: emit usage telemetry through MCP `track_usage_event`
+
+## Integrating Other Tools
+
+### Codex
+
+Use either:
+
+- direct proxy calls with `source: "codex"`
+- or direct event ingestion if Codex usage is reported from another control layer
+
+### Claude
+
+Use:
+
+- `source: "claude"`
+- `integrationType: "observability"` if you only track usage after the fact
+- `integrationType: "proxy"` if you own the request path
+
+### GitHub Copilot
+
+Copilot is usually harder to fully proxy. For v1, treat it as:
+
+- `source: "copilot"`
+- `integrationType: "observability"` or `direct`
+
+and report token/cost metadata through `POST /api/usage-events` or MCP.
+
+### Chrome extension
+
+The Chrome extension path works best when the extension itself sends prompts through CostPilot. In that case use:
+
+- `source: "chrome_extension"`
+- `integrationType: "extension"`
+
+If the extension only watches activity on third-party sites, keep the docs honest and track it as observability, not guaranteed token-accurate billing.
+
+## Policy Engine
+
+Policies are defined by:
+
+- organization
+- role
+- category
+- optional feature
+- token/day limit
+- request/hour limit
+- monthly cost limit
+- allowed models
+- lock/throttle/warn behavior
+
+You can inspect them with:
+
+```bash
+curl http://localhost:4000/api/policies \
+  -H "Authorization: Bearer demo-admin"
+```
+
+## Database Notes
+
+The most important tables for this project are:
+
+- `Organization`
+- `Team`
+- `User`
+- `Policy`
+- `Violation`
+- `UsageEvent`
+- `UsageAggregate`
+- `BillingRecord`
+
+`UsageEvent` is the source of truth for raw usage. `UsageAggregate` exists to support efficient rollups and dashboard views.
+
+## Recommended Production Flow
+
+1. Authenticate users with Clerk.
+2. Sync Clerk users into the CostPilot `User` table.
+3. Route AI traffic through `POST /api/llm-proxy` whenever possible.
+4. Use `POST /api/usage-events` for non-proxyable tools.
+5. Use the MCP server for editor/agent integrations like Cursor.
+6. Build dashboards and budget alerts from `UsageEvent` and `UsageAggregate`.
+
+## Current Limitations
+
+- the MCP server currently authenticates with the same bearer token model as the API
+- for Clerk mode, that means the caller must provide a valid Clerk session token tied to a CostPilot user
+- provider implementations in this starter estimate usage rather than calling live upstream APIs
+- Chrome extension, Copilot, Claude, and Codex integrations are foundational patterns here, not full vendor-specific adapters yet
+
+## Next Recommended Steps
+
+If you want to take this from foundation to product, the next best steps are:
+
+1. add real upstream provider calls for OpenAI, Anthropic, and Gemini
+2. add a first-class integration config table for per-source credentials and enablement
+3. add Clerk webhooks or background sync to auto-provision CostPilot users
+4. add a live dashboard page for raw usage event exploration
+5. build the first concrete Cursor adapter that sends both proxy traffic and session metadata
