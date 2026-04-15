@@ -9,6 +9,7 @@ import { dispatchAlert } from "../services/notification-service.js";
 import { generateOptimizationHints } from "../services/optimizer-service.js";
 import { generateResponse } from "../providers/index.js";
 import { ProviderError } from "../providers/shared.js";
+import type { LlmProxyRequest } from "../types.js";
 import {
   integrationTypeValues,
   normalizeIntegrationType,
@@ -36,13 +37,13 @@ const requestSchema = z.object({
 export async function registerLlmProxyRoutes(app: FastifyInstance) {
   app.post("/api/llm-proxy", { preHandler: [authenticate] }, async (request, reply) => {
     try {
-      const body = requestSchema.parse(request.body);
+      const body = requestSchema.parse(request.body) as LlmProxyRequest;
       const decision = await evaluatePolicy(app, request.auth, body);
 
       if (!decision.allowed) {
         return reply.status(403).send({
           status: "blocked",
-          reason: decision.reason
+          reason: "reason" in decision ? decision.reason : "Blocked by policy."
         });
       }
 
