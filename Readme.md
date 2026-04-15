@@ -63,36 +63,23 @@ This repo now includes the foundation for multi-tool tracking:
 ### 1. Install and configure
 
 ```bash
-cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local
+cp apps/api/.env.example apps/api/.env
 docker-compose up -d
 pnpm install
 ```
 
 ### 2. Required environment variables
 
-`.env.example` includes:
+Frontend variables live in `apps/web/.env.local`:
 
 ```env
-AUTH_MODE="demo"
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/costpilot"
-REDIS_URL="redis://localhost:6379"
-CLICKHOUSE_URL="http://localhost:8123"
-CLICKHOUSE_USERNAME="default"
-CLICKHOUSE_PASSWORD=""
-CLICKHOUSE_DATABASE="costpilot"
-STRIPE_SECRET_KEY="sk_test_xxx"
-STRIPE_WEBHOOK_SECRET="whsec_xxx"
-CLERK_SECRET_KEY="sk_test_xxx"
-CLERK_JWT_KEY="-----BEGIN PUBLIC KEY-----..."
-CLERK_PUBLISHABLE_KEY="pk_test_xxx"
-CLERK_AUTHORIZED_PARTIES="http://localhost:3000,http://localhost:4000"
-LLM_PROVIDER_API_KEY="provider_key"
-ENCRYPTION_KEY="32_character_encryption_key_here"
-SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
-EMAIL_FROM="alerts@costpilot.ai"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 NEXT_PUBLIC_API_URL="http://localhost:4000"
+CLERK_PUBLISHABLE_KEY="pk_test_xxx"
 ```
+
+Backend variables live in `apps/api/.env` and should be copied from `apps/api/.env.example`.
 
 ### 3. Prepare the database
 
@@ -119,6 +106,26 @@ Optional:
 ```bash
 pnpm dev:mcp
 ```
+
+## Vercel deployment (separate frontend/backend projects)
+
+Use two Vercel projects connected to the same repository:
+
+1. `costpilot-web`
+   - Root Directory: `apps/web`
+   - Install Command: `pnpm install --frozen-lockfile`
+   - Build Command: `pnpm build`
+   - Add variables from `apps/web/.env.example` in Vercel project settings
+
+2. `costpilot-api`
+   - Root Directory: `apps/api`
+   - Install Command: `pnpm install --frozen-lockfile`
+   - Build Command: `pnpm build`
+   - Add variables from `apps/api/.env.example` in Vercel project settings
+
+Important:
+- use `pnpm` consistently in Vercel for this monorepo
+- do not mix `npm` lockfiles for one app and `pnpm` workspace for the repo
 
 ## Authentication
 
