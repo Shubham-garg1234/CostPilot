@@ -1,4 +1,4 @@
-import { RoleKey, ViolationAction } from "@prisma/client";
+import { Prisma, RoleKey, ViolationAction } from "@prisma/client";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { authenticate } from "../auth.js";
@@ -73,12 +73,21 @@ export async function registerPolicyRoutes(app: FastifyInstance) {
       });
     }
 
-    const policy = await app.prisma.policy.create({
-      data: {
-        orgId: request.auth.orgId,
-        ...body
-      }
-    });
+    const data: Prisma.PolicyUncheckedCreateInput = {
+      orgId: request.auth.orgId,
+      role: body.role,
+      category: body.category,
+      feature: body.feature ?? null,
+      maxTokensPerDay: body.maxTokensPerDay ?? null,
+      maxRequestsPerHour: body.maxRequestsPerHour ?? null,
+      maxCostPerMonthUsd: body.maxCostPerMonthUsd ?? null,
+      allowedModels: body.allowedModels,
+      actionOnViolation: body.actionOnViolation,
+      cooldownMinutes: body.cooldownMinutes,
+      featureLocked: body.featureLocked
+    };
+
+    const policy = await app.prisma.policy.create({ data });
 
     return reply.status(201).send(policy);
   });
