@@ -40,7 +40,12 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
     }
 
     const body = organizationSchema.parse(request.body);
-    return reply.status(201).send(await createOrganizationRecord(app, body));
+    return reply.status(201).send(
+      await createOrganizationRecord(app, {
+        name: body.name,
+        slug: body.slug
+      })
+    );
   });
 
   app.post("/api/teams", { preHandler: [authenticate] }, async (request, reply) => {
@@ -49,7 +54,13 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
     }
 
     const body = teamSchema.parse(request.body);
-    return reply.status(201).send(await createTeamRecord(app, body));
+    return reply.status(201).send(
+      await createTeamRecord(app, {
+        organizationId: body.organizationId,
+        name: body.name,
+        departmentCode: body.departmentCode
+      })
+    );
   });
 
   app.post("/api/users", { preHandler: [authenticate] }, async (request, reply) => {
@@ -58,6 +69,15 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
     }
 
     const body = userSchema.parse(request.body);
-    return reply.status(201).send(await createUserRecord(app, body));
+    return reply.status(201).send(
+      await createUserRecord(app, {
+        organizationId: body.organizationId,
+        email: body.email,
+        fullName: body.fullName,
+        role: body.role,
+        teamId: body.teamId,
+        clerkUserId: body.clerkUserId
+      })
+    );
   });
 }
