@@ -3,11 +3,13 @@ import cors from "@fastify/cors";
 import { PrismaClient } from "@prisma/client";
 import { Queue } from "bullmq";
 import { ClickHouse } from "clickhouse";
-import Redis from "ioredis";
+import { Redis as IORedis } from "ioredis";
 import Stripe from "stripe";
 import type { FastifyInstance } from "fastify";
 import { getEnvConfig } from "./config.js";
 import type { MemoryQueueLike, MemoryRedisLike } from "./types.js";
+
+type RedisClient = IORedis;
 
 export async function registerPlugins(app: FastifyInstance) {
   const env = getEnvConfig();
@@ -57,8 +59,11 @@ async function buildPrismaClient(app: FastifyInstance) {
   }
 }
 
-async function buildRedisClient(app: FastifyInstance, redisUrl: string): Promise<Redis | MemoryRedisLike> {
-  const redis = new Redis(redisUrl, {
+async function buildRedisClient(
+  app: FastifyInstance,
+  redisUrl: string
+): Promise<RedisClient | MemoryRedisLike> {
+  const redis = new IORedis(redisUrl, {
     maxRetriesPerRequest: null,
     lazyConnect: true
   });
@@ -99,7 +104,7 @@ async function buildClickHouseClient(app: FastifyInstance, env: ReturnType<typeo
 
 async function buildAnalyticsQueue(
   app: FastifyInstance,
-  redis: Redis | MemoryRedisLike
+  redis: RedisClient | MemoryRedisLike
 ): Promise<Queue | MemoryQueueLike> {
   if ("connect" in redis) {
     try {
