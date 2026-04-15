@@ -6,16 +6,24 @@ import { ClickHouse } from "clickhouse";
 import Redis from "ioredis";
 import Stripe from "stripe";
 import type { FastifyInstance } from "fastify";
-import { envSchema } from "./config.js";
+import { getEnvConfig } from "./config.js";
 import type { MemoryQueueLike, MemoryRedisLike } from "./types.js";
 
 export async function registerPlugins(app: FastifyInstance) {
-  await app.register(cors, { origin: true, credentials: true });
+  const env = getEnvConfig();
+  const allowedOrigins = [env.NEXT_PUBLIC_APP_URL, env.NEXT_PUBLIC_API_URL].filter(
+    (origin): origin is string => Boolean(origin)
+  );
+
+  await app.register(cors, {
+    origin: allowedOrigins.length === 0 ? true : allowedOrigins,
+    credentials: true
+  });
   await app.register(infraPlugin);
 }
 
 const infraPlugin = fp(async (app) => {
-  const env = envSchema.parse(process.env);
+  const env = getEnvConfig();
   const prisma = await buildPrismaClient(app);
   const redis = await buildRedisClient(app, env.REDIS_URL);
   const clickhouse = await buildClickHouseClient(app, env);
@@ -67,7 +75,7 @@ async function buildRedisClient(app: FastifyInstance, redisUrl: string): Promise
   }
 }
 
-async function buildClickHouseClient(app: FastifyInstance, env: ReturnType<typeof envSchema.parse>) {
+async function buildClickHouseClient(app: FastifyInstance, env: ReturnType<typeof getEnvConfig>) {
   try {
     const clickhouse = new ClickHouse({
       url: env.CLICKHOUSE_URL,

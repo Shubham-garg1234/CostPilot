@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { RoleKey } from "@prisma/client";
+import { getEnvConfig } from "./config.js";
 
 const fallbackSeedUsers: Record<
   string,
@@ -37,7 +38,7 @@ const clerkClient = createClerkClient({
 });
 
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
-  const authMode = (process.env.AUTH_MODE ?? "demo") as "demo" | "clerk";
+  const authMode = getEnvConfig().AUTH_MODE;
 
   if (authMode === "demo") {
     request.auth = await resolveDemoAuth(request);
@@ -142,14 +143,15 @@ function extractBearerToken(request: FastifyRequest) {
 
 async function verifyClerkToken(token: string) {
   try {
-    const authorizedParties = (process.env.CLERK_AUTHORIZED_PARTIES ?? "")
+    const env = getEnvConfig();
+    const authorizedParties = (env.CLERK_AUTHORIZED_PARTIES ?? "")
       .split(",")
       .map((entry) => entry.trim())
       .filter(Boolean);
 
     return await verifyToken(token, {
-      secretKey: process.env.CLERK_SECRET_KEY ?? "sk_test_placeholder",
-      jwtKey: process.env.CLERK_JWT_KEY,
+      secretKey: env.CLERK_SECRET_KEY,
+      jwtKey: env.CLERK_JWT_KEY,
       authorizedParties: authorizedParties.length > 0 ? authorizedParties : undefined
     });
   } catch {

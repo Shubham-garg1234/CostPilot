@@ -2,6 +2,7 @@ import { RoleKey } from "@prisma/client";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { authenticate, createDemoToken } from "../auth.js";
+import { getEnvConfig } from "../config.js";
 import { getOrganizationSnapshot } from "../services/organization-service.js";
 
 const demoLoginSchema = z.object({
@@ -15,11 +16,12 @@ const demoLoginSchema = z.object({
 
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.get("/api/auth/session", { preHandler: [authenticate] }, async (request) => {
+    const env = getEnvConfig();
     const snapshot = await getOrganizationSnapshot(app, request.auth.orgId);
 
     return {
       authMode: request.auth.authMode,
-      clerkEnabled: (process.env.AUTH_MODE ?? "demo") === "clerk",
+      clerkEnabled: env.AUTH_MODE === "clerk",
       user: request.auth,
       availableRoles: Object.values(RoleKey),
       availableTeams: snapshot.teams
@@ -27,7 +29,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/auth/demo-login", async (request, reply) => {
-    if ((process.env.AUTH_MODE ?? "demo") !== "demo") {
+    if (getEnvConfig().AUTH_MODE !== "demo") {
       return reply.status(400).send({ message: "Demo login is only available in AUTH_MODE=demo." });
     }
 
@@ -59,4 +61,3 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 }
-

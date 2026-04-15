@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, Pill } from "./ui";
-import { buildAuthHeaders, getApiBase } from "../lib/api";
+import { ApiError, requestJson } from "../lib/api";
 
 type PolicyRecord = {
   id: string;
@@ -22,41 +22,45 @@ export function PolicyManager() {
   const [feature, setFeature] = useState("auto_reply");
   const [allowedModels, setAllowedModels] = useState("gpt-4o-mini,gpt-4.1-mini");
   const [action, setAction] = useState("WARN");
+  const [status, setStatus] = useState("Loading policies...");
 
   useEffect(() => {
     void load();
   }, []);
 
   async function load() {
-    const response = await fetch(`${getApiBase()}/api/policies`, {
-      headers: buildAuthHeaders()
-    });
-    const payload = (await response.json()) as PolicyRecord[];
-    setPolicies(payload);
+    try {
+      const payload = await requestJson<PolicyRecord[]>("/api/policies");
+      setPolicies(payload);
+      setStatus(`Loaded ${payload.length} policies`);
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to load policies.");
+    }
   }
 
   async function createPolicy() {
-    const response = await fetch(`${getApiBase()}/api/policies`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...buildAuthHeaders()
-      },
-      body: JSON.stringify({
-        role,
-        category,
-        feature,
-        allowedModels: allowedModels.split(",").map((item) => item.trim()).filter(Boolean),
-        actionOnViolation: action,
-        maxTokensPerDay: 10000,
-        maxRequestsPerHour: 5,
-        cooldownMinutes: 15,
-        featureLocked: role === "INTERN" && category === "code_generation"
-      })
-    });
-
-    if (response.ok) {
+    try {
+      await requestJson("/api/policies", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          role,
+          category,
+          feature,
+          allowedModels: allowedModels.split(",").map((item) => item.trim()).filter(Boolean),
+          actionOnViolation: action,
+          maxTokensPerDay: 10000,
+          maxRequestsPerHour: 5,
+          cooldownMinutes: 15,
+          featureLocked: role === "INTERN" && category === "code_generation"
+        })
+      });
+      setStatus(`Created ${role} policy for ${category}`);
       await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to create policy.");
     }
   }
 
@@ -70,6 +74,7 @@ export function PolicyManager() {
           </div>
           <Pill tone="warn">Real-time enforcement</Pill>
         </div>
+        <p className="mt-4 text-sm text-slate-600">{status}</p>
         <div className="mt-6 grid gap-3 md:grid-cols-5">
           <select value={role} onChange={(event) => setRole(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2">
             {["ADMIN", "MANAGER", "SDE1", "SDE2", "INTERN"].map((entry) => <option key={entry}>{entry}</option>)}

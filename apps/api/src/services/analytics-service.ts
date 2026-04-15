@@ -48,8 +48,8 @@ export async function persistUsageEvent(app: FastifyInstance, payload: UsageEven
         }
       });
 
-      await tx.usageAggregate.create({
-        data: {
+      const existingAggregate = await tx.usageAggregate.findFirst({
+        where: {
           orgId: payload.auth.orgId,
           userId: payload.auth.userId,
           teamId: payload.auth.teamId ?? undefined,
@@ -64,14 +64,47 @@ export async function persistUsageEvent(app: FastifyInstance, payload: UsageEven
           category: payload.category,
           feature: payload.feature,
           provider: payload.provider,
-          model: payload.model,
-          promptTokens: payload.promptTokens,
-          completionTokens: payload.completionTokens,
-          totalTokens: payload.totalTokens,
-          requestCount: 1,
-          costUsd: payload.costUsd
+          model: payload.model
         }
       });
+
+      if (existingAggregate) {
+        await tx.usageAggregate.update({
+          where: { id: existingAggregate.id },
+          data: {
+            promptTokens: { increment: payload.promptTokens },
+            completionTokens: { increment: payload.completionTokens },
+            totalTokens: { increment: payload.totalTokens },
+            requestCount: { increment: 1 },
+            costUsd: { increment: payload.costUsd }
+          }
+        });
+      } else {
+        await tx.usageAggregate.create({
+          data: {
+            orgId: payload.auth.orgId,
+            userId: payload.auth.userId,
+            teamId: payload.auth.teamId ?? undefined,
+            role: payload.auth.role,
+            source: payload.source,
+            integrationType: payload.integrationType,
+            workspaceId: payload.workspaceId,
+            sessionId: payload.sessionId,
+            dayBucket,
+            hourBucket,
+            monthBucket,
+            category: payload.category,
+            feature: payload.feature,
+            provider: payload.provider,
+            model: payload.model,
+            promptTokens: payload.promptTokens,
+            completionTokens: payload.completionTokens,
+            totalTokens: payload.totalTokens,
+            requestCount: 1,
+            costUsd: payload.costUsd
+          }
+        });
+      }
 
       return usageEvent;
     });

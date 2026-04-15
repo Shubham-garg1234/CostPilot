@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, Pill } from "./ui";
-import { buildAuthHeaders, getApiBase } from "../lib/api";
+import { ApiError, requestJson } from "../lib/api";
 
 type OrganizationSnapshot = {
   organization: { id: string; name: string; slug: string; createdAt: string };
@@ -25,25 +25,28 @@ export function OrganizationManager() {
   }, []);
 
   async function load() {
-    const response = await fetch(`${getApiBase()}/api/organizations/current`, {
-      headers: buildAuthHeaders()
-    });
-    const payload = (await response.json()) as OrganizationSnapshot;
-    setSnapshot(payload);
-    setStatus(`Loaded ${payload.organization.name}`);
+    try {
+      const payload = await requestJson<OrganizationSnapshot>("/api/organizations/current");
+      setSnapshot(payload);
+      setStatus(`Loaded ${payload.organization.name}`);
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to load organization.");
+    }
   }
 
   async function createOrganization() {
-    const response = await fetch(`${getApiBase()}/api/organizations`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...buildAuthHeaders()
-      },
-      body: JSON.stringify({ name: orgName, slug: orgSlug })
-    });
-    if (response.ok) {
+    try {
+      await requestJson("/api/organizations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ name: orgName, slug: orgSlug })
+      });
       setStatus(`Created organization ${orgName}`);
+      await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to create organization.");
     }
   }
 
@@ -52,20 +55,21 @@ export function OrganizationManager() {
       return;
     }
 
-    const response = await fetch(`${getApiBase()}/api/teams`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...buildAuthHeaders()
-      },
-      body: JSON.stringify({
-        organizationId: snapshot.organization.id,
-        name: teamName
-      })
-    });
-    if (response.ok) {
+    try {
+      await requestJson("/api/teams", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          organizationId: snapshot.organization.id,
+          name: teamName
+        })
+      });
       setStatus(`Created team ${teamName}`);
       await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to create team.");
     }
   }
 
@@ -74,23 +78,24 @@ export function OrganizationManager() {
       return;
     }
 
-    const response = await fetch(`${getApiBase()}/api/users`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...buildAuthHeaders()
-      },
-      body: JSON.stringify({
-        organizationId: snapshot.organization.id,
-        teamId: snapshot.teams[0]?.id,
-        fullName: userName,
-        email: userEmail,
-        role: userRole
-      })
-    });
-    if (response.ok) {
+    try {
+      await requestJson("/api/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          organizationId: snapshot.organization.id,
+          teamId: snapshot.teams[0]?.id,
+          fullName: userName,
+          email: userEmail,
+          role: userRole
+        })
+      });
       setStatus(`Added ${userName}`);
       await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to add user.");
     }
   }
 
@@ -175,4 +180,3 @@ export function OrganizationManager() {
     </div>
   );
 }
-
