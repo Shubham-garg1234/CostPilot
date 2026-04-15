@@ -7,7 +7,7 @@ async function getHandler() {
   if (!cachedHandler) {
     const app = await buildApp();
     await app.ready();
-    const proxy = serverless(app);
+    const proxy = serverless(app as unknown as Parameters<typeof serverless>[0]);
 
     cachedHandler = async (req: unknown, res: unknown) => {
       await proxy(req, res);
