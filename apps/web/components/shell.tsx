@@ -2,6 +2,7 @@ import type { PropsWithChildren } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import { BarChart3, BellRing, Building2, Shield, WalletCards } from "lucide-react";
+import { AuthControls } from "./auth-controls";
 
 const navItems = [
   { href: "/", label: "Overview", icon: BarChart3 },
@@ -11,7 +12,7 @@ const navItems = [
   { href: "/billing", label: "Billing", icon: WalletCards }
 ] as const satisfies ReadonlyArray<{ href: Route; label: string; icon: typeof BarChart3 }>;
 
-export function AppShell({ children }: PropsWithChildren) {
+export function AppShell({ children, clerkEnabled }: PropsWithChildren<{ clerkEnabled?: boolean }>) {
   return (
     <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-5 md:px-8">
       <header className="glass mb-6 flex items-center justify-between rounded-[32px] px-6 py-4">
@@ -33,6 +34,7 @@ export function AppShell({ children }: PropsWithChildren) {
             </Link>
           ))}
         </nav>
+        <AuthControls enabled={Boolean(clerkEnabled)} />
       </header>
       {children}
     </div>

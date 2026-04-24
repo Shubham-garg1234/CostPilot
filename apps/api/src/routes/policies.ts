@@ -17,40 +17,9 @@ const policySchema = z.object({
 });
 
 export async function registerPolicyRoutes(app: FastifyInstance) {
-  app.get("/api/policies", { preHandler: [authenticate] }, async (request) => {
+  app.get("/api/policies", { preHandler: [authenticate] }, async (request, reply) => {
     if (!app.prisma) {
-      return [
-        {
-          id: "demo-policy-intern",
-          orgId: request.auth.orgId,
-          role: "INTERN",
-          category: "code_generation",
-          feature: "copilot",
-          maxTokensPerDay: 0,
-          maxRequestsPerHour: 0,
-          maxCostPerMonthUsd: 0,
-          allowedModels: ["gpt-4o-mini"],
-          disabled: false,
-          cooldownMinutes: 60,
-          featureLocked: true,
-          actionOnViolation: "BLOCK"
-        },
-        {
-          id: "demo-policy-sde1",
-          orgId: request.auth.orgId,
-          role: "SDE1",
-          category: "email_generation",
-          feature: "auto_reply",
-          maxTokensPerDay: 10000,
-          maxRequestsPerHour: 5,
-          maxCostPerMonthUsd: 50,
-          allowedModels: ["gpt-4o-mini", "gpt-4.1-mini"],
-          disabled: false,
-          cooldownMinutes: 15,
-          featureLocked: false,
-          actionOnViolation: "WARN"
-        }
-      ];
+      return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
     return app.prisma.policy.findMany({
@@ -64,14 +33,11 @@ export async function registerPolicyRoutes(app: FastifyInstance) {
       return reply.status(403).send({ message: "Only admins and managers can create policies." });
     }
 
-    const body = policySchema.parse(request.body);
     if (!app.prisma) {
-      return reply.status(201).send({
-        id: "demo-created-policy",
-        orgId: request.auth.orgId,
-        ...body
-      });
+      return reply.status(503).send({ message: "Policy writes are unavailable until PostgreSQL is healthy." });
     }
+
+    const body = policySchema.parse(request.body);
 
     const data: Prisma.PolicyUncheckedCreateInput = {
       orgId: request.auth.orgId,

@@ -3,22 +3,9 @@ import { authenticate } from "../auth.js";
 import { generateMonthlyBilling } from "../services/billing-service.js";
 
 export async function registerBillingRoutes(app: FastifyInstance) {
-  app.get("/api/billing/current", { preHandler: [authenticate] }, async (request) => {
+  app.get("/api/billing/current", { preHandler: [authenticate] }, async (request, reply) => {
     if (!app.prisma) {
-      return {
-        records: [
-          {
-            id: "demo-billing-apr",
-            orgId: request.auth.orgId,
-            periodStart: new Date().toISOString(),
-            periodEnd: new Date().toISOString(),
-            rawCostUsd: 11466,
-            markupPercentage: 12.5,
-            finalCostUsd: 12899,
-            status: "OPEN"
-          }
-        ]
-      };
+      return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
     const records = await app.prisma.billingRecord.findMany({
@@ -36,14 +23,7 @@ export async function registerBillingRoutes(app: FastifyInstance) {
     }
 
     if (!app.prisma) {
-      return reply.status(201).send({
-        id: "demo-generated-billing",
-        orgId: request.auth.orgId,
-        rawCostUsd: 11466,
-        markupPercentage: 12.5,
-        finalCostUsd: 12899,
-        status: "DRAFT"
-      });
+      return reply.status(503).send({ message: "Billing generation is unavailable until PostgreSQL is healthy." });
     }
 
     const record = await generateMonthlyBilling(app, request.auth.orgId);

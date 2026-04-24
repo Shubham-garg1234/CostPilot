@@ -1,5 +1,3 @@
-import type { Queue } from "bullmq";
-import type { ClickHouse } from "clickhouse";
 import type Redis from "ioredis";
 import type Stripe from "stripe";
 import type { IntegrationType, PrismaClient, RoleKey, UsageSource } from "@prisma/client";
@@ -8,7 +6,7 @@ export type AuthContext = {
   userId: string;
   orgId: string;
   role: RoleKey;
-  authMode: "demo" | "clerk";
+  authMode: "clerk";
   teamId?: string | null;
   email?: string;
   name?: string;
@@ -87,13 +85,44 @@ export type LlmProviderResponse = {
   completionTokens: number;
 };
 
+export type DependencyMode = "required" | "optional";
+
+export type DependencyState = {
+  name: "postgres" | "redis" | "clickhouse";
+  mode: DependencyMode;
+  configured: boolean;
+  available: boolean;
+  target: string;
+  detail?: string;
+};
+
+export type AnalyticsWriteResult = {
+  persisted: boolean;
+  status: "written" | "skipped";
+  detail?: string;
+};
+
+export type UpstashRedisLike = {
+  mget(...keys: string[]): Promise<Array<string | null>>;
+  multi(): {
+    incrby(key: string, value: number): unknown;
+    expire(key: string, seconds: number): unknown;
+    incrbyfloat(key: string, value: number): unknown;
+    incr(key: string): unknown;
+    set(key: string, value: string | number, mode: "EX", seconds: number): unknown;
+    exec(): Promise<unknown[]>;
+  };
+  quit(): Promise<void>;
+};
+
 declare module "fastify" {
   interface FastifyInstance {
     prisma: PrismaClient | null;
-    redis: Redis | MemoryRedisLike;
-    clickhouse: ClickHouse | null;
+    redis: Redis | MemoryRedisLike | UpstashRedisLike;
+    clickhouse: ClickHouseClientLike | null;
     stripe: Stripe;
-    analyticsQueue: Queue | MemoryQueueLike;
+    dependencyStates: DependencyState[];
+    isReadyForTraffic(): boolean;
   }
 
   interface FastifyRequest {
@@ -114,7 +143,8 @@ export type MemoryRedisLike = {
   quit(): Promise<void>;
 };
 
-export type MemoryQueueLike = {
-  add(name: string, payload: unknown, options?: unknown): Promise<{ name: string; payload: unknown; options?: unknown }>;
-  close(): Promise<void>;
+export type ClickHouseClientLike = {
+  ping(): Promise<void>;
+  ensureSchema(): Promise<void>;
+  insertUsageEvent(payload: UsageEventInput): Promise<void>;
 };

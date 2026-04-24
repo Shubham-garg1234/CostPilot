@@ -19,51 +19,6 @@ type PolicyLike = Pick<
   | "actionOnViolation"
 >;
 
-const demoPolicies: PolicyLike[] = [
-  {
-    orgId: "acme-org",
-    role: "INTERN",
-    category: "code_generation",
-    feature: "copilot",
-    maxTokensPerDay: 0,
-    maxRequestsPerHour: 0,
-    maxCostPerMonthUsd: new Prisma.Decimal(0),
-    allowedModels: ["gpt-4o-mini"],
-    disabled: false,
-    cooldownMinutes: 60,
-    featureLocked: true,
-    actionOnViolation: ViolationAction.BLOCK
-  },
-  {
-    orgId: "acme-org",
-    role: "SDE1",
-    category: "email_generation",
-    feature: "auto_reply",
-    maxTokensPerDay: 10000,
-    maxRequestsPerHour: 30,
-    maxCostPerMonthUsd: new Prisma.Decimal(50),
-    allowedModels: ["gpt-4o-mini", "gpt-4.1-mini"],
-    disabled: false,
-    cooldownMinutes: 15,
-    featureLocked: false,
-    actionOnViolation: ViolationAction.WARN
-  },
-  {
-    orgId: "acme-org",
-    role: "MANAGER",
-    category: "chat",
-    feature: null,
-    maxTokensPerDay: 120000,
-    maxRequestsPerHour: 250,
-    maxCostPerMonthUsd: new Prisma.Decimal(400),
-    allowedModels: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1"],
-    disabled: false,
-    cooldownMinutes: 5,
-    featureLocked: false,
-    actionOnViolation: ViolationAction.THROTTLE
-  }
-];
-
 function matchesPolicy(policy: PolicyLike, request: LlmProxyRequest, auth: AuthContext) {
   return (
     policy.orgId === auth.orgId &&
@@ -73,13 +28,9 @@ function matchesPolicy(policy: PolicyLike, request: LlmProxyRequest, auth: AuthC
   );
 }
 
-export async function resolvePolicy(
-  app: FastifyInstance,
-  auth: AuthContext,
-  request: LlmProxyRequest
-) {
+export async function resolvePolicy(app: FastifyInstance, auth: AuthContext, request: LlmProxyRequest) {
   if (!app.prisma) {
-    return demoPolicies.find((policy) => matchesPolicy(policy, request, auth)) ?? null;
+    throw new Error("PostgreSQL is unavailable.");
   }
 
   const policies = await app.prisma.policy.findMany({

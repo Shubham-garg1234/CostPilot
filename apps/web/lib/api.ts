@@ -11,43 +11,33 @@ export function getApiBase() {
   return process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4000";
 }
 
-export function getStoredDemoToken() {
-  if (typeof window === "undefined") {
-    return "";
+declare global {
+  interface Window {
+    Clerk?: {
+      session?: {
+        getToken: () => Promise<string | null>;
+      };
+    };
   }
-
-  return window.localStorage.getItem("costpilot-demo-token") ?? "";
 }
 
-export function setStoredDemoToken(token: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  if (!token) {
-    window.localStorage.removeItem("costpilot-demo-token");
-    return;
-  }
-
-  window.localStorage.setItem("costpilot-demo-token", token);
-}
-
-export function buildAuthHeaders() {
-  const token = getStoredDemoToken();
+export async function buildAuthHeaders() {
   const headers: Record<string, string> = {};
 
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  const clerkToken = await window.Clerk?.session?.getToken?.().catch(() => null);
+  if (clerkToken) {
+    headers.Authorization = `Bearer ${clerkToken}`;
   }
 
   return headers;
 }
 
 export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const authHeaders = await buildAuthHeaders();
   const response = await fetch(`${getApiBase()}${path}`, {
     ...init,
     headers: {
-      ...buildAuthHeaders(),
+      ...authHeaders,
       ...(init?.headers ?? {})
     }
   });

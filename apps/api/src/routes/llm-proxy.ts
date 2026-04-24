@@ -4,7 +4,7 @@ import { authenticate } from "../auth.js";
 import { calculateCost } from "../services/costing.js";
 import { evaluatePolicy } from "../services/policy-engine.js";
 import { commitUsage } from "../services/usage-counter-service.js";
-import { enqueueApiLog, persistUsageEvent } from "../services/analytics-service.js";
+import { mirrorUsageEventToAnalytics, persistUsageEvent } from "../services/analytics-service.js";
 import { dispatchAlert } from "../services/notification-service.js";
 import { generateOptimizationHints } from "../services/optimizer-service.js";
 import { generateResponse } from "../providers/index.js";
@@ -68,8 +68,7 @@ export async function registerLlmProxyRoutes(app: FastifyInstance) {
       const cost = calculateCost(body.model, promptTokens, completionTokens);
       const source = normalizeUsageSource(body.source);
       const integrationType = normalizeIntegrationType(body.integrationType);
-
-      const usageEvent = await persistUsageEvent(app, {
+      const usagePayload = {
         auth: request.auth,
         provider,
         model: body.model,
@@ -88,30 +87,14 @@ export async function registerLlmProxyRoutes(app: FastifyInstance) {
         metadata: body.metadata,
         startedAt: body.startedAt ? new Date(body.startedAt) : undefined,
         completedAt: body.completedAt ? new Date(body.completedAt) : undefined
-      });
+      };
+      const usageEvent = await persistUsageEvent(app, usagePayload);
+      const analyticsWrite = usageEvent
+        ? await mirrorUsageEventToAnalytics(app, usagePayload)
+        : { persisted: false, status: "skipped" as const, detail: "Duplicate usage event." };
 
       if (usageEvent) {
         await commitUsage(app, request.auth, body.category, body.feature, totalTokens, cost.totalCostUsd);
-        await enqueueApiLog(app, {
-          auth: request.auth,
-          provider,
-          model: body.model,
-          category: body.category,
-          feature: body.feature,
-          source,
-          integrationType,
-          workspaceId: body.workspaceId,
-          sessionId: body.sessionId,
-          requestId: body.requestId,
-          status: body.status ?? "success",
-          promptTokens,
-          completionTokens,
-          totalTokens,
-          costUsd: cost.totalCostUsd,
-          metadata: body.metadata,
-          startedAt: body.startedAt ? new Date(body.startedAt) : undefined,
-          completedAt: body.completedAt ? new Date(body.completedAt) : undefined
-        });
       }
 
       if (usageEvent && (totalTokens > 4000 || cost.totalCostUsd > 0.1)) {
@@ -135,6 +118,8 @@ export async function registerLlmProxyRoutes(app: FastifyInstance) {
           source: body.source ?? "sdk",
           integrationType: body.integrationType ?? "proxy"
         },
+        analyticsStatus: analyticsWrite.status,
+        analyticsDetail: analyticsWrite.detail,
         optimizationHints: generateOptimizationHints({
           model: body.model,
           promptTokens,

@@ -3,31 +3,9 @@ import { authenticate } from "../auth.js";
 import { serializeUsageSource } from "../services/usage-source.js";
 
 export async function registerDashboardRoutes(app: FastifyInstance) {
-  app.get("/api/dashboard/summary", { preHandler: [authenticate] }, async (request) => {
+  app.get("/api/dashboard/summary", { preHandler: [authenticate] }, async (request, reply) => {
     if (!app.prisma) {
-      return {
-        metrics: [
-          { label: "Total Tokens", value: "44,800,000", trend: "+18.2%" },
-          { label: "Spend", value: "$12,842.00", trend: "+6.4%" },
-          { label: "Requests", value: "128,430", trend: "+12.1%" }
-        ],
-        topUsers: [
-          { id: "demo-admin", name: "Ava Admin", role: "ADMIN", category: "chat", costUsd: 430.22, tokens: 1542000 }
-        ],
-        topFeatures: [
-          { feature: "auto_reply", category: "email_generation", costUsd: 1210.54, tokens: 6400000 }
-        ],
-        sourceBreakdown: [
-          { source: "sdk", costUsd: 3910, tokens: 12800000, requests: 32100 },
-          { source: "cursor", costUsd: 5440, tokens: 17400000, requests: 50110 },
-          { source: "codex", costUsd: 1852, tokens: 6200000, requests: 22820 }
-        ],
-        providerBreakdown: [
-          { provider: "openai", costUsd: 7920, tokens: 28400000, requests: 77000 },
-          { provider: "anthropic", costUsd: 3310, tokens: 9700000, requests: 29800 }
-        ],
-        recentViolations: []
-      };
+      return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
     const where = { orgId: request.auth.orgId };

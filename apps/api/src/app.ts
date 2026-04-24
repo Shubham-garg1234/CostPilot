@@ -28,13 +28,25 @@ export async function buildApp() {
     status: "ok",
     service: "costpilot-api",
     environment: env.NODE_ENV,
-    authMode: env.AUTH_MODE,
-    dependencies: {
-      postgres: Boolean(app.prisma),
-      redis: "connect" in app.redis,
-      clickhouse: Boolean(app.clickhouse)
-    }
+    authMode: env.AUTH_MODE
   }));
+
+  app.get("/ready", async (_, reply) => {
+    const ready = app.isReadyForTraffic();
+    const payload = {
+      status: ready ? "ready" : "degraded",
+      service: "costpilot-api",
+      environment: env.NODE_ENV,
+      authMode: env.AUTH_MODE,
+      dependencies: app.dependencyStates
+    };
+
+    if (!ready) {
+      return reply.status(503).send(payload);
+    }
+
+    return payload;
+  });
 
   await registerAuthRoutes(app);
   await registerOrganizationRoutes(app);

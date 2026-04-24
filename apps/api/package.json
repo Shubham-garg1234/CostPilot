@@ -3,8 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  
+  "prisma": {
+    "schema": "../../prisma/schema.prisma"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "lint": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -14,9 +19,11 @@
     "@fastify/cors": "^10.0.2",
     "@fastify/sensible": "^5.6.0",
     "@prisma/client": "^6.6.0",
+    "@upstash/redis": "^1.37.0",
     "bullmq": "^5.47.0",
     "clickhouse": "^2.6.0",
     "dayjs": "^1.11.13",
+    "dotenv": "^17.4.2",
     "fastify": "^5.2.1",
     "fastify-plugin": "^5.0.1",
     "ioredis": "^5.6.1",

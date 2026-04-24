@@ -1,10 +1,18 @@
 import { z } from "zod";
 
+const dependencyModeSchema = z.enum(["required", "optional"]);
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  AUTH_MODE: z.enum(["demo", "clerk"]).default("demo"),
+  AUTH_MODE: z.literal("clerk").default("clerk"),
+  POSTGRES_MODE: dependencyModeSchema.default("required"),
+  REDIS_MODE: dependencyModeSchema.default("required"),
+  CLICKHOUSE_MODE: dependencyModeSchema.default("required"),
   DATABASE_URL: z.string().min(1).default("postgresql://postgres:postgres@localhost:5432/costpilot"),
+  DIRECT_URL: z.string().min(1).optional(),
   REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
+  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
   CLICKHOUSE_URL: z.string().url().default("http://localhost:8123"),
   CLICKHOUSE_USERNAME: z.string().min(1).default("default"),
   CLICKHOUSE_PASSWORD: z.string().default(""),
@@ -21,6 +29,8 @@ export const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   SLACK_WEBHOOK_URL: z.string().url().optional(),
   EMAIL_FROM: z.string().email().optional(),
+  NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_API_URL: z.string().url().optional()
 });
@@ -28,13 +38,6 @@ export const envSchema = z.object({
 export const parsedEnvSchema = envSchema.superRefine((env, ctx) => {
   if (env.NODE_ENV !== "production") {
     return;
-  }
-
-  if (env.AUTH_MODE !== "clerk") {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "AUTH_MODE must be set to 'clerk' in production."
-    });
   }
 
   const disallowedPlaceholders = [
@@ -64,6 +67,51 @@ export const parsedEnvSchema = envSchema.superRefine((env, ctx) => {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "NEXT_PUBLIC_API_URL is required in production."
+    });
+  }
+
+  const hasUpstash = Boolean(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN);
+  const hasRedisUrl = Boolean(env.REDIS_URL && env.REDIS_URL !== "redis://localhost:6379");
+  if (!hasUpstash && !hasRedisUrl) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "Configure Redis using either UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN or a hosted REDIS_URL in production."
+    });
+  }
+
+  if (!env.CLICKHOUSE_URL || env.CLICKHOUSE_URL === "http://localhost:8123") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "CLICKHOUSE_URL must be configured with the hosted ClickHouse endpoint in production."
+    });
+  }
+
+  if (!env.CLICKHOUSE_USERNAME) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "CLICKHOUSE_USERNAME is required in production."
+    });
+  }
+
+  if (!env.CLERK_JWT_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "CLERK_JWT_KEY is required in production."
+    });
+  }
+
+  if (!env.CLERK_PUBLISHABLE_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "CLERK_PUBLISHABLE_KEY is required in production."
+    });
+  }
+
+  if (!env.DIRECT_URL) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "DIRECT_URL is required in production so Prisma migrations can use a direct Postgres connection."
     });
   }
 });

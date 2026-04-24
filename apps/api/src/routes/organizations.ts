@@ -30,7 +30,11 @@ const userSchema = z.object({
 });
 
 export async function registerOrganizationRoutes(app: FastifyInstance) {
-  app.get("/api/organizations/current", { preHandler: [authenticate] }, async (request) => {
+  app.get("/api/organizations/current", { preHandler: [authenticate] }, async (request, reply) => {
+    if (!app.prisma) {
+      return reply.status(503).send({ message: "PostgreSQL is unavailable." });
+    }
+
     return getOrganizationSnapshot(app, request.auth.orgId);
   });
 

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ClerkProvider } from "@clerk/nextjs";
 import { DM_Sans, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "../components/shell";
@@ -20,12 +21,22 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const rawClerkPublishableKey =
+    process.env.CLERK_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const clerkPublishableKey =
+    rawClerkPublishableKey && !rawClerkPublishableKey.endsWith("_xxx") ? rawClerkPublishableKey : undefined;
+
   return (
     <html lang="en">
       <body className={`${sans.variable} ${display.variable} font-sans`}>
-        <AppShell>{children}</AppShell>
+        {clerkPublishableKey ? (
+          <ClerkProvider publishableKey={clerkPublishableKey}>
+            <AppShell clerkEnabled>{children}</AppShell>
+          </ClerkProvider>
+        ) : (
+          <AppShell clerkEnabled={false}>{children}</AppShell>
+        )}
       </body>
     </html>
   );
 }
-

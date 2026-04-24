@@ -7,7 +7,7 @@ This repo now supports:
 - LLM proxying through `POST /api/llm-proxy`
 - raw source-aware usage event ingestion through `POST /api/usage-events`
 - usage breakdowns by `source`, `provider`, `category`, `feature`, `workspace`, and `session`
-- demo auth and Clerk-backed auth
+- Clerk-backed auth
 - a local MCP server package for Cursor and other MCP-capable tools
 - a Next.js dashboard for spend, policy, and operational views
 
@@ -81,13 +81,16 @@ CLERK_PUBLISHABLE_KEY="pk_test_xxx"
 
 Backend variables live in `apps/api/.env` and should be copied from `apps/api/.env.example`.
 
+Hosted production on Render should not reuse the local defaults. Set `AUTH_MODE=clerk` and keep `POSTGRES_MODE`, `REDIS_MODE`, and `CLICKHOUSE_MODE` all at `required`.
+
 ### 3. Prepare the database
 
 ```bash
 pnpm prisma:generate
 pnpm prisma:migrate
-pnpm prisma:seed
 ```
+
+The API also runs `prisma migrate deploy` automatically on startup, so a fresh environment can create the PostgreSQL tables without a separate manual migration step as long as `DATABASE_URL` and `DIRECT_URL` are configured.
 
 The Prisma schema now stores both:
 
@@ -127,29 +130,45 @@ Important:
 - use `pnpm` consistently in Vercel for this monorepo
 - do not mix `npm` lockfiles for one app and `pnpm` workspace for the repo
 
+## Render deployment
+
+This repo now includes a root `render.yaml` for a two-service Render setup:
+
+1. `costpilot-api`
+   - Root directory: `apps/api`
+   - Must run with `AUTH_MODE=clerk`
+   - Must have `DATABASE_URL`, `REDIS_URL`, and `CLICKHOUSE_URL` configured to hosted services
+   - Uses `POSTGRES_MODE=required`, `REDIS_MODE=required`, and `CLICKHOUSE_MODE=required`
+
+2. `costpilot-web`
+   - Root directory: `apps/web`
+   - Needs `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL`, and `CLERK_PUBLISHABLE_KEY`
+
+Required API variables for Render:
+
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `REDIS_URL`
+- `CLICKHOUSE_URL`
+- `CLICKHOUSE_USERNAME`
+- `CLICKHOUSE_PASSWORD`
+- `CLICKHOUSE_DATABASE`
+- `CLERK_SECRET_KEY`
+- `CLERK_JWT_KEY`
+- `CLERK_PUBLISHABLE_KEY`
+- `CLERK_AUTHORIZED_PARTIES`
+- `NEXT_PUBLIC_APP_URL`
+- `NEXT_PUBLIC_API_URL`
+
+Dependency behavior on hosted Render:
+
+- `/health` is liveness only
+- `/ready` returns dependency readiness and fails with HTTP `503` if any required dependency is unavailable
+- PostgreSQL, Redis, and ClickHouse failures no longer silently downgrade the hosted app into demo behavior
+
 ## Authentication
 
-CostPilot supports two auth modes.
-
-### Demo mode
-
-Use this for local development without Clerk:
-
-```env
-AUTH_MODE=demo
-```
-
-Use one of these bearer tokens:
-
-- `demo-admin`
-- `demo-manager`
-- `demo-intern`
-
-You can also generate a demo token using `POST /api/auth/demo-login`.
-
-### Clerk mode
-
-Use this for production-like auth:
+CostPilot is now Clerk-only:
 
 ```env
 AUTH_MODE=clerk
@@ -173,11 +192,11 @@ Important:
 - the user must also exist in CostPilot's database
 - the `users.clerkUserId` column should match the Clerk user id
 
-You can create linked users through the API:
+You can create linked users through the API once you have an authenticated Clerk admin token:
 
 ```bash
 curl -X POST http://localhost:4000/api/users \
-  -H "Authorization: Bearer demo-admin" \
+  -H "Authorization: Bearer <clerk-session-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "organizationId": "YOUR_ORG_ID",
@@ -211,7 +230,7 @@ Example request:
 
 ```bash
 curl -X POST http://localhost:4000/api/llm-proxy \
-  -H "Authorization: Bearer demo-admin" \
+  -H "Authorization: Bearer <clerk-session-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Summarize this PR and suggest review comments.",
@@ -267,7 +286,7 @@ Example:
 
 ```bash
 curl -X POST http://localhost:4000/api/usage-events \
-  -H "Authorization: Bearer demo-admin" \
+  -H "Authorization: Bearer <clerk-session-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-3-7-sonnet",
@@ -310,7 +329,7 @@ Example:
 
 ```bash
 curl "http://localhost:4000/api/usage-events/summary?days=14&source=cursor" \
-  -H "Authorization: Bearer demo-admin"
+  -H "Authorization: Bearer <clerk-session-token>"
 ```
 
 ### `GET /api/usage-events/recent`
@@ -351,7 +370,7 @@ await trackLLM(
   },
   {
     apiUrl: "http://localhost:4000",
-    apiKey: "demo-manager"
+    apiKey: "<clerk-session-token>"
   }
 );
 ```
@@ -371,7 +390,7 @@ The MCP server lives in `packages/mcp` and forwards MCP tool calls into the Cost
 
 ```bash
 set COSTPILOT_API_URL=http://127.0.0.1:4000
-set COSTPILOT_API_KEY=demo-admin
+set COSTPILOT_API_KEY=your_clerk_session_token
 pnpm dev:mcp
 ```
 
@@ -379,7 +398,7 @@ On macOS/Linux:
 
 ```bash
 export COSTPILOT_API_URL=http://127.0.0.1:4000
-export COSTPILOT_API_KEY=demo-admin
+export COSTPILOT_API_KEY=your_clerk_session_token
 pnpm dev:mcp
 ```
 
@@ -399,13 +418,13 @@ Cursor supports MCP servers through its MCP config. On Windows, a typical setup 
   "mcpServers": {
     "costpilot": {
       "command": "pnpm.cmd",
-      "args": ["--dir", "C:\\Users\\Shubham\\Desktop\\CostPilot", "dev:mcp"],
-      "env": {
-        "COSTPILOT_API_URL": "http://127.0.0.1:4000",
-        "COSTPILOT_API_KEY": "demo-admin"
+        "args": ["--dir", "C:\\Users\\Shubham\\Desktop\\CostPilot", "dev:mcp"],
+        "env": {
+          "COSTPILOT_API_URL": "http://127.0.0.1:4000",
+          "COSTPILOT_API_KEY": "your_clerk_session_token"
+        }
       }
     }
-  }
 }
 ```
 
@@ -473,7 +492,7 @@ You can inspect them with:
 
 ```bash
 curl http://localhost:4000/api/policies \
-  -H "Authorization: Bearer demo-admin"
+  -H "Authorization: Bearer <clerk-session-token>"
 ```
 
 ## Database Notes

@@ -1,14 +1,7 @@
 import dayjs from "dayjs";
 import { Prisma } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
-import type { UsageEventInput } from "../types.js";
-
-export async function enqueueApiLog(app: FastifyInstance, payload: UsageEventInput) {
-  await app.analyticsQueue.add("write-log", payload, {
-    removeOnComplete: 1000,
-    removeOnFail: 1000
-  });
-}
+import type { AnalyticsWriteResult, UsageEventInput } from "../types.js";
 
 export async function persistUsageEvent(app: FastifyInstance, payload: UsageEventInput) {
   if (!app.prisma) {
@@ -116,5 +109,34 @@ export async function persistUsageEvent(app: FastifyInstance, payload: UsageEven
 
     app.log.warn({ error, requestId: payload.requestId }, "Usage persistence failed");
     return null;
+  }
+}
+
+export async function mirrorUsageEventToAnalytics(
+  app: FastifyInstance,
+  payload: UsageEventInput
+): Promise<AnalyticsWriteResult> {
+  if (!app.clickhouse) {
+    return {
+      persisted: false,
+      status: "skipped",
+      detail: "ClickHouse is unavailable."
+    };
+  }
+
+  try {
+    await app.clickhouse.insertUsageEvent(payload);
+    return {
+      persisted: true,
+      status: "written"
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Analytics write failed";
+    app.log.warn({ error, requestId: payload.requestId }, "ClickHouse analytics mirror failed");
+    return {
+      persisted: false,
+      status: "skipped",
+      detail
+    };
   }
 }
