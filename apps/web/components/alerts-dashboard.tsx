@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { BellRing, RefreshCcw } from "lucide-react";
 import { Card, Pill } from "./ui";
 import { ApiError, requestJson } from "../lib/api";
@@ -14,18 +15,29 @@ function formatTime(value: string) {
 }
 
 export function AlertsDashboard() {
+  const { isLoaded, isSignedIn } = useAuth();
   const [items, setItems] = useState<DashboardSummary["recentViolations"]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("Unable to load alerts.");
 
   useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
+      setStatus("error");
+      setError("Sign in to load alerts.");
+      return;
+    }
+
     void load();
-  }, []);
+  }, [isLoaded, isSignedIn]);
 
   async function load() {
     try {
       setStatus("loading");
-      const payload = await requestJson<DashboardSummary>("/api/dashboard/summary");
+      const payload = await requestJson<DashboardSummary>("/api/dashboard/summary", { authMode: "clerk" });
       setItems(payload.recentViolations);
       setStatus("ready");
     } catch (issue) {

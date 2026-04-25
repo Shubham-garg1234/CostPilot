@@ -3,10 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@9.15.0",
+  "bin": {
+    "costpilot-mcp": "./bin/costpilot-mcp.mjs"
+  },
   "scripts": {
     "dev:web": "pnpm --filter @costpilot/web dev",
-    "dev:api": "pnpm --filter @costpilot/api dev",
-    "dev:mcp": "pnpm --filter @costpilot/mcp dev",
+    "dev:api": "node scripts/dev-api-and-mcp.mjs",
+    "dev:api:http": "pnpm --filter @costpilot/api dev",
+    "dev:api:mcp": "pnpm --filter @costpilot/api dev:mcp",
+    "mcp:client": "node ./bin/costpilot-mcp.mjs",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",

@@ -1,3 +1,11 @@
+import { config } from "dotenv";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { clearMcpHeartbeat, writeMcpHeartbeat } from "../services/mcp-status-service.js";
+
+const mcpDir = path.dirname(fileURLToPath(import.meta.url));
+config({ path: path.join(mcpDir, "../../.env"), quiet: true });
+
 type JsonRpcId = number | string | null;
 
 type JsonRpcRequest = {
@@ -7,8 +15,24 @@ type JsonRpcRequest = {
   params?: Record<string, unknown>;
 };
 
-const apiUrl = process.env.COSTPILOT_API_URL ?? "http://127.0.0.1:4000";
-const apiKey = process.env.COSTPILOT_API_KEY ?? "demo-admin";
+const apiUrl = process.env.COSTPILOT_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4000";
+const employeeEmail = process.env.COSTPILOT_EMPLOYEE_EMAIL?.trim() ?? "";
+const employeePassword = process.env.COSTPILOT_EMPLOYEE_PASSWORD?.trim() ?? "";
+let employeeToken = "";
+
+writeMcpHeartbeat();
+const heartbeatInterval = setInterval(() => writeMcpHeartbeat(), 10_000);
+process.on("exit", () => clearMcpHeartbeat());
+process.on("SIGINT", () => {
+  clearInterval(heartbeatInterval);
+  clearMcpHeartbeat();
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  clearInterval(heartbeatInterval);
+  clearMcpHeartbeat();
+  process.exit(0);
+});
 
 let buffer = Buffer.alloc(0);
 
@@ -169,15 +193,24 @@ async function handleToolCall(message: JsonRpcRequest) {
   }
 }
 
-async function apiFetch(path: string, init?: RequestInit) {
-  const response = await fetch(`${apiUrl}${path}`, {
+async function apiFetch(requestPath: string, init?: RequestInit) {
+  if (!employeeToken) {
+    employeeToken = await loginEmployee();
+  }
+
+  const response = await fetch(`${apiUrl}${requestPath}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${employeeToken}`,
       "Content-Type": "application/json",
-      ...(init?.headers ?? {})
+      ...((init?.headers ?? {}) as Record<string, string>)
     }
   });
+
+  if (response.status === 401) {
+    employeeToken = await loginEmployee();
+    return apiFetch(requestPath, init);
+  }
 
   const text = await response.text();
   const payload = text ? safeJsonParse(text) : {};
@@ -193,6 +226,30 @@ async function apiFetch(path: string, init?: RequestInit) {
   }
 
   return payload;
+}
+
+async function loginEmployee() {
+  if (!employeeEmail || !employeePassword) {
+    throw new Error("Set COSTPILOT_EMPLOYEE_EMAIL and COSTPILOT_EMPLOYEE_PASSWORD before using MCP tools.");
+  }
+
+  const response = await fetch(`${apiUrl}/api/auth/employee-login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      email: employeeEmail,
+      password: employeePassword
+    })
+  });
+
+  const payload = (await response.json().catch(() => null)) as { token?: string; message?: string } | null;
+  if (!response.ok || !payload?.token) {
+    throw new Error(payload?.message ?? "Unable to log in MCP employee session.");
+  }
+
+  return payload.token;
 }
 
 function safeJsonParse(text: string) {

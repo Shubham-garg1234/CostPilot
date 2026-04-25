@@ -1,5 +1,21 @@
 import { RoleKey, ViolationAction } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
+import { createPasswordHash, generateTemporaryPassword } from "./employee-auth-service.js";
+import { sendEmployeeCredentialsEmail } from "./mailer-service.js";
+
+export class OrganizationConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrganizationConflictError";
+  }
+}
+
+export class OrganizationNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrganizationNotFoundError";
+  }
+}
 
 export type OrganizationSnapshot = {
   organization: {
@@ -9,7 +25,7 @@ export type OrganizationSnapshot = {
     createdAt: string;
   };
   teams: Array<{ id: string; name: string; departmentCode?: string | null; userCount: number }>;
-  users: Array<{ id: string; email: string; name: string; role: RoleKey; teamId?: string | null }>;
+  users: Array<{ id: string; email: string; name: string; role: RoleKey; teamId?: string | null; hasPassword: boolean }>;
   policies: Array<{
     id: string;
     role: RoleKey;
@@ -43,7 +59,7 @@ export async function getOrganizationSnapshot(app: FastifyInstance, orgId: strin
   });
 
   if (!organization) {
-    throw new Error("Organization not found.");
+    throw new OrganizationNotFoundError("Organization not found.");
   }
 
   return {
@@ -64,7 +80,8 @@ export async function getOrganizationSnapshot(app: FastifyInstance, orgId: strin
       email: user.email,
       name: user.fullName,
       role: user.role,
-      teamId: user.teamId
+      teamId: user.teamId,
+      hasPassword: Boolean(user.passwordHash)
     })),
     policies: organization.policies.map((policy) => ({
       id: policy.id,
@@ -79,12 +96,70 @@ export async function getOrganizationSnapshot(app: FastifyInstance, orgId: strin
   };
 }
 
-export async function createOrganizationRecord(app: FastifyInstance, input: { name: string; slug: string }) {
+export async function createOrganizationRecord(
+  app: FastifyInstance,
+  input: { name: string; slug: string; currentOrgId: string; actorUserId: string }
+) {
   if (!app.prisma) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
-  const organization = await app.prisma.organization.create({
+  const currentOrganization = await app.prisma.organization.findUnique({
+    where: { id: input.currentOrgId },
+    include: {
+      users: {
+        select: {
+          id: true
+        }
+      },
+      _count: {
+        select: {
+          teams: true,
+          policies: true,
+          usageEvents: true,
+          billingRecords: true,
+          violations: true
+        }
+      }
+    }
+  });
+
+  let organization;
+
+  if (!currentOrganization) {
+    organization = await app.prisma.organization.create({
+      data: {
+        name: input.name,
+        slug: input.slug
+      }
+    });
+
+    return {
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+      createdAt: organization.createdAt.toISOString(),
+      created: true
+    };
+  }
+
+  const onlyActorBelongsToCurrentOrganization =
+    currentOrganization.users.length === 1 && currentOrganization.users[0]?.id === input.actorUserId;
+  const currentOrganizationIsEmpty =
+    currentOrganization._count.teams === 0 &&
+    currentOrganization._count.policies === 0 &&
+    currentOrganization._count.usageEvents === 0 &&
+    currentOrganization._count.billingRecords === 0 &&
+    currentOrganization._count.violations === 0;
+
+  if (!onlyActorBelongsToCurrentOrganization || !currentOrganizationIsEmpty) {
+    throw new OrganizationConflictError(
+      "Your account already belongs to an active organization. Use the current workspace instead of creating another one."
+    );
+  }
+
+  organization = await app.prisma.organization.update({
+    where: { id: currentOrganization.id },
     data: {
       name: input.name,
       slug: input.slug
@@ -95,7 +170,8 @@ export async function createOrganizationRecord(app: FastifyInstance, input: { na
     id: organization.id,
     name: organization.name,
     slug: organization.slug,
-    createdAt: organization.createdAt.toISOString()
+    createdAt: organization.createdAt.toISOString(),
+    created: false
   };
 }
 
@@ -139,6 +215,33 @@ export async function createUserRecord(
     throw new Error("PostgreSQL is unavailable.");
   }
 
+  if (input.teamId) {
+    const team = await app.prisma.team.findFirst({
+      where: {
+        id: input.teamId,
+        organizationId: input.organizationId
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!team) {
+      throw new Error("Selected team does not belong to the current organization.");
+    }
+  }
+
+  const organization = await app.prisma.organization.findUnique({
+    where: { id: input.organizationId },
+    select: { id: true, name: true }
+  });
+
+  if (!organization) {
+    throw new Error("Organization not found.");
+  }
+
+  const temporaryPassword = generateTemporaryPassword();
+
   const user = await app.prisma.user.create({
     data: {
       organizationId: input.organizationId,
@@ -146,8 +249,18 @@ export async function createUserRecord(
       fullName: input.fullName,
       role: input.role,
       teamId: input.teamId,
-      clerkUserId: input.clerkUserId ?? input.email
+      clerkUserId: input.clerkUserId ?? null,
+      passwordHash: createPasswordHash(temporaryPassword),
+      passwordSetAt: new Date()
     }
+  });
+
+  const emailResult = await sendEmployeeCredentialsEmail({
+    to: user.email,
+    fullName: user.fullName,
+    organizationId: organization.id,
+    organizationName: organization.name,
+    password: temporaryPassword
   });
 
   return {
@@ -155,6 +268,9 @@ export async function createUserRecord(
     email: user.email,
     name: user.fullName,
     role: user.role,
-    teamId: user.teamId
+    teamId: user.teamId,
+    temporaryPassword,
+    emailDelivered: emailResult.delivered,
+    emailDeliveryNote: emailResult.delivered ? undefined : emailResult.reason
   };
 }

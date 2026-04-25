@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { DM_Sans, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "../components/shell";
+import { ClerkTokenBridge } from "../components/clerk-token-bridge";
 
 const sans = DM_Sans({
   subsets: ["latin"],
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       <body className={`${sans.variable} ${display.variable} font-sans`}>
         {clerkPublishableKey ? (
           <ClerkProvider publishableKey={clerkPublishableKey}>
+            <ClerkTokenBridge />
             <AppShell clerkEnabled>{children}</AppShell>
           </ClerkProvider>
         ) : (

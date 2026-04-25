@@ -1,103 +1,174 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { Card, Pill } from "./ui";
 import { ApiError, requestJson } from "../lib/api";
 
 type OrganizationSnapshot = {
   organization: { id: string; name: string; slug: string; createdAt: string };
   teams: Array<{ id: string; name: string; departmentCode?: string | null; userCount: number }>;
-  users: Array<{ id: string; email: string; name: string; role: string; teamId?: string | null }>;
+  users: Array<{ id: string; email: string; name: string; role: string; teamId?: string | null; hasPassword: boolean }>;
+  policies: Array<{ id: string }>;
 };
 
 export function OrganizationManager() {
+  const { isLoaded, isSignedIn } = useAuth();
   const [snapshot, setSnapshot] = useState<OrganizationSnapshot | null>(null);
-  const [orgName, setOrgName] = useState("Northstar Labs");
-  const [orgSlug, setOrgSlug] = useState("northstar-labs");
+  const [orgName, setOrgName] = useState("");
+  const [orgSlug, setOrgSlug] = useState("");
   const [teamName, setTeamName] = useState("AI Enablement");
+  const [departmentCode, setDepartmentCode] = useState("AI");
   const [userName, setUserName] = useState("Rina Engineer");
   const [userEmail, setUserEmail] = useState("rina@northstar.ai");
   const [userRole, setUserRole] = useState("SDE1");
-  const [status, setStatus] = useState("Loading organization...");
+  const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [status, setStatus] = useState("Checking your workspace...");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
+      setSnapshot(null);
+      setStatus("Sign in through organization login to create or manage your organization.");
+      return;
+    }
+
     void load();
-  }, []);
+  }, [isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    if (slugTouched) {
+      return;
+    }
+
+    setOrgSlug(slugify(orgName));
+  }, [orgName, slugTouched]);
+
+  useEffect(() => {
+    if (!snapshot?.teams.length) {
+      setSelectedTeamId("");
+      return;
+    }
+
+    setSelectedTeamId((current) => (current && snapshot.teams.some((team) => team.id === current) ? current : snapshot.teams[0]?.id ?? ""));
+  }, [snapshot]);
 
   async function load() {
     try {
-      const payload = await requestJson<OrganizationSnapshot>("/api/organizations/current");
+      const payload = await requestJson<OrganizationSnapshot>("/api/organizations/current", { authMode: "clerk" });
       setSnapshot(payload);
+      setOrgName((current) => current || payload.organization.name);
+      setOrgSlug((current) => current || payload.organization.slug);
       setStatus(`Loaded ${payload.organization.name}`);
     } catch (error) {
+      setSnapshot(null);
       setStatus(error instanceof ApiError ? error.message : "Unable to load organization.");
     }
   }
 
   async function createOrganization() {
+    if (!isSignedIn) {
+      setStatus("Sign in before saving organization details.");
+      return;
+    }
+
     try {
-      await requestJson("/api/organizations", {
+      setSubmitting(true);
+      const payload = await requestJson<{ name: string; created?: boolean }>("/api/organizations", {
+        authMode: "clerk",
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ name: orgName, slug: orgSlug })
       });
-      setStatus(`Created organization ${orgName}`);
+      setStatus(payload.created ? `Created organization ${payload.name}` : `Saved organization details for ${payload.name}`);
       await load();
     } catch (error) {
-      setStatus(error instanceof ApiError ? error.message : "Unable to create organization.");
+      setStatus(error instanceof ApiError ? error.message : "Unable to save organization details.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function createTeam() {
-    if (!snapshot) {
+    if (!isSignedIn || !snapshot) {
+      setStatus("Load your organization before creating a team.");
       return;
     }
 
     try {
+      setSubmitting(true);
       await requestJson("/api/teams", {
+        authMode: "clerk",
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          organizationId: snapshot.organization.id,
-          name: teamName
+          name: teamName,
+          departmentCode: departmentCode || undefined
         })
       });
       setStatus(`Created team ${teamName}`);
       await load();
     } catch (error) {
       setStatus(error instanceof ApiError ? error.message : "Unable to create team.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function createUser() {
-    if (!snapshot) {
+    if (!isSignedIn || !snapshot) {
+      setStatus("Load your organization before adding a user.");
+      return;
+    }
+
+    if (!selectedTeamId) {
+      setStatus("Create a team first, then assign the employee to that team.");
       return;
     }
 
     try {
-      await requestJson("/api/users", {
+      setSubmitting(true);
+      const payload = await requestJson<{ temporaryPassword?: string; emailDelivered?: boolean; emailDeliveryNote?: string }>("/api/users", {
+        authMode: "clerk",
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          organizationId: snapshot.organization.id,
-          teamId: snapshot.teams[0]?.id,
+          teamId: selectedTeamId,
           fullName: userName,
           email: userEmail,
           role: userRole
         })
       });
-      setStatus(`Added ${userName}`);
+      setStatus(
+        payload.emailDelivered
+          ? `Added ${userName}. Credentials were emailed automatically.`
+          : `Added ${userName}. Temporary password: ${payload.temporaryPassword ?? "generated"}. ${payload.emailDeliveryNote ?? ""}`.trim()
+      );
       await load();
     } catch (error) {
       setStatus(error instanceof ApiError ? error.message : "Unable to add user.");
+    } finally {
+      setSubmitting(false);
     }
   }
+
+  const signedOut = isLoaded && !isSignedIn;
+  const organizationLocked = snapshot
+    ? snapshot.teams.length > 0 || snapshot.users.length > 1 || snapshot.policies.length > 0
+    : false;
+  const currentSlug = snapshot?.organization.slug ?? (signedOut ? "signed-out" : "no-organization");
 
   return (
     <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
@@ -105,47 +176,95 @@ export function OrganizationManager() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm text-slate-500">Organization Dashboard</p>
-            <h1 className="font-display text-4xl font-semibold">{snapshot?.organization.name ?? "Organization"}</h1>
+            <h1 className="font-display text-4xl font-semibold">
+              {snapshot?.organization.name ?? (signedOut ? "Sign in required" : "Set up your organization")}
+            </h1>
           </div>
-          <Pill>{snapshot?.organization.slug ?? "demo-org"}</Pill>
+          <Pill>{currentSlug}</Pill>
         </div>
         <p className="mt-4 text-sm text-slate-600">{status}</p>
+        {signedOut ? (
+          <div className="mt-6 rounded-[20px] border border-dashed border-black/10 bg-white/70 px-4 py-4 text-sm text-slate-600">
+            Use the dedicated <Link href="/organization/login" className="font-medium text-slate-900 underline">organization login</Link> route
+            to enter the admin workspace.
+          </div>
+        ) : null}
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           <label className="rounded-[20px] bg-white/80 p-4 text-sm">
             <span className="mb-2 block text-slate-500">Org name</span>
-            <input value={orgName} onChange={(event) => setOrgName(event.target.value)} className="w-full rounded-xl border border-black/10 px-3 py-2" />
+            <input
+              value={orgName}
+              onChange={(event) => setOrgName(event.target.value)}
+              disabled={organizationLocked}
+              className="w-full rounded-xl border border-black/10 px-3 py-2 disabled:bg-stone-100"
+              placeholder="Acme AI"
+            />
           </label>
           <label className="rounded-[20px] bg-white/80 p-4 text-sm">
             <span className="mb-2 block text-slate-500">Org slug</span>
-            <input value={orgSlug} onChange={(event) => setOrgSlug(event.target.value)} className="w-full rounded-xl border border-black/10 px-3 py-2" />
+            <input
+              value={orgSlug}
+              onChange={(event) => {
+                setSlugTouched(true);
+                setOrgSlug(slugify(event.target.value));
+              }}
+              disabled={organizationLocked}
+              className="w-full rounded-xl border border-black/10 px-3 py-2 disabled:bg-stone-100"
+              placeholder="acme-ai"
+            />
           </label>
           <div className="flex items-end">
-            <button onClick={() => void createOrganization()} className="w-full rounded-full bg-black px-5 py-3 text-sm font-medium text-white">
-              Create Organization
+            <button
+              onClick={() => void createOrganization()}
+              disabled={!isSignedIn || organizationLocked || submitting || orgName.trim().length < 2 || orgSlug.trim().length < 2}
+              className="w-full rounded-full bg-black px-5 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {snapshot ? "Save Organization" : "Create Organization"}
             </button>
           </div>
         </div>
+        <p className="mt-3 text-xs text-slate-500">
+          {organizationLocked
+            ? "Organization name and slug are locked for now after setup."
+            : "Set the organization name and slug first. You can add teams and employees after that."}
+        </p>
 
         <div className="mt-8 grid gap-3">
-          {snapshot?.teams.map((team) => (
-            <div key={team.id} className="grid grid-cols-[1.4fr_1fr_auto] items-center rounded-[18px] bg-white/75 px-4 py-3 text-sm">
-              <div>
-                <p className="font-medium">{team.name}</p>
-                <p className="text-slate-500">{team.departmentCode ?? "General"}</p>
+          {snapshot?.teams.length ? (
+            snapshot.teams.map((team) => (
+              <div key={team.id} className="grid grid-cols-[1.4fr_1fr_auto] items-center rounded-[18px] bg-white/75 px-4 py-3 text-sm">
+                <div>
+                  <p className="font-medium">{team.name}</p>
+                  <p className="text-slate-500">{team.departmentCode ?? "General"}</p>
+                </div>
+                <span>{team.userCount} users</span>
+                <Pill>{team.id}</Pill>
               </div>
-              <span>{team.userCount} users</span>
-              <Pill>{team.id}</Pill>
+            ))
+          ) : (
+            <div className="rounded-[18px] border border-dashed border-black/10 bg-white/70 px-4 py-4 text-sm text-slate-600">
+              {signedOut ? "Sign in to see your teams." : "No teams yet. Add your first team and it will appear here."}
             </div>
-          ))}
+          )}
         </div>
       </Card>
 
       <div className="space-y-6">
         <Card className="p-6">
           <p className="text-sm text-slate-500">Create team</p>
-          <div className="mt-4 flex gap-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_140px_auto]">
             <input value={teamName} onChange={(event) => setTeamName(event.target.value)} className="flex-1 rounded-xl border border-black/10 px-3 py-2" />
-            <button onClick={() => void createTeam()} className="rounded-full bg-teal-900 px-5 py-2 text-sm font-medium text-white">
+            <input
+              value={departmentCode}
+              onChange={(event) => setDepartmentCode(event.target.value)}
+              className="rounded-xl border border-black/10 px-3 py-2"
+              placeholder="Dept code"
+            />
+            <button
+              onClick={() => void createTeam()}
+              disabled={!snapshot || !isSignedIn || submitting || teamName.trim().length < 2}
+              className="rounded-full bg-teal-900 px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
               Add Team
             </button>
           </div>
@@ -156,6 +275,22 @@ export function OrganizationManager() {
           <div className="mt-4 grid gap-3">
             <input value={userName} onChange={(event) => setUserName(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" />
             <input value={userEmail} onChange={(event) => setUserEmail(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" />
+            <label className="grid gap-2 text-sm text-slate-600">
+              <span>Select team</span>
+            <select
+              value={selectedTeamId}
+              onChange={(event) => setSelectedTeamId(event.target.value)}
+              className="rounded-xl border border-black/10 px-3 py-2"
+              disabled={!snapshot?.teams.length}
+            >
+              <option value="">{snapshot?.teams.length ? "Select team" : "Create a team first"}</option>
+              {snapshot?.teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}{team.departmentCode ? ` (${team.departmentCode})` : ""}
+                </option>
+              ))}
+            </select>
+            </label>
             <select value={userRole} onChange={(event) => setUserRole(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2">
               {["ADMIN", "MANAGER", "SDE1", "SDE2", "INTERN"].map((role) => (
                 <option key={role} value={role}>
@@ -163,20 +298,39 @@ export function OrganizationManager() {
                 </option>
               ))}
             </select>
-            <button onClick={() => void createUser()} className="rounded-full bg-black px-5 py-2 text-sm font-medium text-white">
+            <button
+              onClick={() => void createUser()}
+              disabled={!snapshot || !isSignedIn || submitting || userName.trim().length < 2 || !userEmail.includes("@") || !selectedTeamId}
+              className="rounded-full bg-black px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
               Add User
             </button>
           </div>
+          <p className="mt-3 text-xs text-slate-500">Every employee must belong to a team so reporting and policy ownership stay clean.</p>
           <div className="mt-5 space-y-2">
-            {snapshot?.users.map((user) => (
-              <div key={user.id} className="rounded-[18px] bg-stone-100 px-4 py-3 text-sm">
-                <p className="font-medium">{user.name}</p>
-                <p className="text-slate-500">{user.email} · {user.role}</p>
+            {snapshot?.users.length ? (
+              snapshot.users.map((user) => (
+                <div key={user.id} className="rounded-[18px] bg-stone-100 px-4 py-3 text-sm">
+                  <p className="font-medium">{user.name}</p>
+                  <p className="text-slate-500">{user.email} - {user.role} - {user.hasPassword ? "employee login ready" : "password pending"}</p>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-[18px] border border-dashed border-black/10 bg-stone-50 px-4 py-4 text-sm text-slate-600">
+                {signedOut ? "Sign in to manage users." : "No users added yet. Invite your first teammate here."}
               </div>
-            ))}
+            )}
           </div>
         </Card>
       </div>
     </div>
   );
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }

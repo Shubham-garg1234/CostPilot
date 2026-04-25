@@ -2,15 +2,31 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { RoleKey } from "@prisma/client";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { getEnvConfig } from "./config.js";
+import { verifyEmployeeAccessToken } from "./services/employee-auth-service.js";
 
 const clerkClient = createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY ?? "sk_test_placeholder"
 });
 
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
+  const env = getEnvConfig();
   const token = extractBearerToken(request);
   if (!token) {
-    return reply.status(401).send({ message: "Missing Clerk bearer token." });
+    return reply.status(401).send({ message: "Missing access token." });
+  }
+
+  const employeeToken = verifyEmployeeAccessToken(token, env.EMPLOYEE_AUTH_SECRET);
+  if (employeeToken) {
+    request.auth = {
+      userId: employeeToken.userId,
+      orgId: employeeToken.orgId,
+      role: employeeToken.role,
+      authMode: "employee",
+      teamId: employeeToken.teamId,
+      email: employeeToken.email,
+      name: employeeToken.name
+    };
+    return;
   }
 
   const verified = await verifyClerkToken(token);
@@ -85,15 +101,34 @@ async function verifyClerkToken(token: string) {
       .split(",")
       .map((entry) => entry.trim())
       .filter(Boolean);
+    const jwtKey = normalizeClerkJwtKey(env.CLERK_JWT_KEY);
 
     return await verifyToken(token, {
       secretKey: env.CLERK_SECRET_KEY,
-      jwtKey: env.CLERK_JWT_KEY,
+      jwtKey,
       authorizedParties: authorizedParties.length > 0 ? authorizedParties : undefined
     });
   } catch {
     return null;
   }
+}
+
+function normalizeClerkJwtKey(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  // Ignore placeholder values so local/dev auth can still verify via Clerk.
+  if (trimmed.includes("this-is-meant-to-be-secret") || trimmed.endsWith("_xxx") || trimmed === "placeholder") {
+    return undefined;
+  }
+
+  return trimmed;
 }
 
 async function bootstrapInitialUser(input: {

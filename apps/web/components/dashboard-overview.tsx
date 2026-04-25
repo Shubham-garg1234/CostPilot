@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { AlertTriangle, BarChart3, DatabaseZap, RefreshCcw, ShieldCheck, Wallet } from "lucide-react";
 import { Card, Pill } from "./ui";
 import { ApiError, requestJson } from "../lib/api";
@@ -23,18 +24,29 @@ function currency(value: number) {
 }
 
 export function DashboardOverview() {
+  const { isLoaded, isSignedIn } = useAuth();
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("Unable to load dashboard data.");
 
   useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
+      setStatus("error");
+      setError("Sign in to load dashboard data.");
+      return;
+    }
+
     void load();
-  }, []);
+  }, [isLoaded, isSignedIn]);
 
   async function load() {
     try {
       setStatus("loading");
-      const payload = await requestJson<DashboardSummary>("/api/dashboard/summary");
+      const payload = await requestJson<DashboardSummary>("/api/dashboard/summary", { authMode: "clerk" });
       setData(payload);
       setStatus("ready");
     } catch (issue) {

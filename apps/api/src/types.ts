@@ -6,7 +6,7 @@ export type AuthContext = {
   userId: string;
   orgId: string;
   role: RoleKey;
-  authMode: "clerk";
+  authMode: "clerk" | "employee";
   teamId?: string | null;
   email?: string;
   name?: string;

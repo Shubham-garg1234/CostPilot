@@ -93,12 +93,14 @@ model Team {
 
 model User {
   id              String           @id @default(cuid())
-  clerkUserId     String           @unique
+  clerkUserId     String?          @unique
   email           String           @unique
   fullName        String
   organizationId  String
   teamId          String?
   role            RoleKey
+  passwordHash    String?
+  passwordSetAt   DateTime?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)

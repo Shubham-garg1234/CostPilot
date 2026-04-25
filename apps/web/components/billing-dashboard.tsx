@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { RefreshCcw } from "lucide-react";
 import { Card, Pill } from "./ui";
 import { ApiError, requestJson } from "../lib/api";
@@ -27,18 +28,29 @@ function monthLabel(value: string) {
 }
 
 export function BillingDashboard() {
+  const { isLoaded, isSignedIn } = useAuth();
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("Unable to load billing records.");
 
   useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
+      setStatus("error");
+      setError("Sign in to load billing records.");
+      return;
+    }
+
     void load();
-  }, []);
+  }, [isLoaded, isSignedIn]);
 
   async function load() {
     try {
       setStatus("loading");
-      const payload = await requestJson<BillingResponse>("/api/billing/current");
+      const payload = await requestJson<BillingResponse>("/api/billing/current", { authMode: "clerk" });
       setRecords(payload.records);
       setStatus("ready");
     } catch (issue) {

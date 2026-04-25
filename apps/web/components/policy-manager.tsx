@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { Card, Pill } from "./ui";
 import { ApiError, requestJson } from "../lib/api";
 
@@ -16,6 +17,7 @@ type PolicyRecord = {
 };
 
 export function PolicyManager() {
+  const { isLoaded, isSignedIn } = useAuth();
   const [policies, setPolicies] = useState<PolicyRecord[]>([]);
   const [role, setRole] = useState("SDE1");
   const [category, setCategory] = useState("email_generation");
@@ -25,12 +27,21 @@ export function PolicyManager() {
   const [status, setStatus] = useState("Loading policies...");
 
   useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
+      setStatus("Sign in to load policies.");
+      return;
+    }
+
     void load();
-  }, []);
+  }, [isLoaded, isSignedIn]);
 
   async function load() {
     try {
-      const payload = await requestJson<PolicyRecord[]>("/api/policies");
+      const payload = await requestJson<PolicyRecord[]>("/api/policies", { authMode: "clerk" });
       setPolicies(payload);
       setStatus(`Loaded ${payload.length} policies`);
     } catch (error) {
@@ -41,6 +52,7 @@ export function PolicyManager() {
   async function createPolicy() {
     try {
       await requestJson("/api/policies", {
+        authMode: "clerk",
         method: "POST",
         headers: {
           "Content-Type": "application/json"
