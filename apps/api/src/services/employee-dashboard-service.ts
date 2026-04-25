@@ -35,7 +35,7 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
     mcpServers: {
       costpilot: {
         command: "npx",
-        args: ["-y", "github:Shubham-garg1234/TokenGuard#main"],
+        args: ["-y", "--package=github:Shubham-garg1234/TokenGuard#main", "costpilot-mcp"],
         env: {
           COSTPILOT_API_URL: input.apiBaseUrl,
           COSTPILOT_EMPLOYEE_EMAIL: user.email,
