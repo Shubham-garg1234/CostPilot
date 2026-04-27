@@ -7,7 +7,7 @@ import { BarChart3, BellRing, Building2, Shield, WalletCards } from "lucide-reac
 
 const organizationNavItems = [
   { href: "/organization", label: "Overview", icon: BarChart3 },
-  { href: "/organization", label: "Organization", icon: Building2 },
+  { href: "/organization/manage", label: "Organization", icon: Building2 },
   { href: "/policies", label: "Policies", icon: Shield },
   { href: "/alerts", label: "Alerts", icon: BellRing },
   { href: "/billing", label: "Billing", icon: WalletCards }

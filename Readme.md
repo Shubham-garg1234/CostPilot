@@ -27,7 +27,7 @@ There are two login experiences:
 - manages organization settings, teams, users, policies, and billing
 
 2. Employee login
-- uses `organizationId + email + password`
+- uses `email + password`
 - shows the employee’s own usage, spend, and Cursor MCP configuration
 
 When an admin adds a user, CostPilot generates a temporary password and can email the credentials automatically if SMTP is configured.
@@ -36,7 +36,6 @@ When an admin adds a user, CostPilot generates a temporary password and can emai
 
 Employees sign in with:
 
-- `organizationId`
 - work email
 - password
 
@@ -46,7 +45,6 @@ Set these in `apps/api/.env` when you want to use MCP locally:
 
 ```env
 COSTPILOT_API_URL="http://127.0.0.1:4000"
-COSTPILOT_EMPLOYEE_ORG_ID=""
 COSTPILOT_EMPLOYEE_EMAIL=""
 COSTPILOT_EMPLOYEE_PASSWORD=""
 ```
@@ -135,17 +133,14 @@ Typical local Cursor config:
 {
   "mcpServers": {
     "costpilot": {
-      "command": "pnpm.cmd",
+      "command": "npx",
       "args": [
-        "--dir",
-        "C:\\Users\\Shubham\\Desktop\\CostPilot",
-        "--filter",
-        "@costpilot/api",
-        "dev:mcp"
+        "-y",
+        "--package=github:Shubham-garg1234/CostPilot_MCP",
+        "costpilot-mcp"
       ],
       "env": {
-        "COSTPILOT_API_URL": "http://127.0.0.1:4000",
-        "COSTPILOT_EMPLOYEE_ORG_ID": "your-org-id",
+        "COSTPILOT_API_URL": "https://costpilot-lmzd.onrender.com",
         "COSTPILOT_EMPLOYEE_EMAIL": "your-email",
         "COSTPILOT_EMPLOYEE_PASSWORD": "your-password"
       }

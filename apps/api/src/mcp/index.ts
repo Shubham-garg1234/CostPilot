@@ -18,23 +18,22 @@ type JsonRpcRequest = {
 const apiUrl = process.env.COSTPILOT_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4000";
 const employeeEmail = process.env.COSTPILOT_EMPLOYEE_EMAIL?.trim() ?? "";
 const employeePassword = process.env.COSTPILOT_EMPLOYEE_PASSWORD?.trim() ?? "";
+
 let employeeToken = "";
+let buffer = Buffer.alloc(0);
 
 writeMcpHeartbeat();
 const heartbeatInterval = setInterval(() => writeMcpHeartbeat(), 10_000);
-process.on("exit", () => clearMcpHeartbeat());
-process.on("SIGINT", () => {
-  clearInterval(heartbeatInterval);
-  clearMcpHeartbeat();
-  process.exit(0);
-});
-process.on("SIGTERM", () => {
-  clearInterval(heartbeatInterval);
-  clearMcpHeartbeat();
-  process.exit(0);
-});
 
-let buffer = Buffer.alloc(0);
+function shutdown(code = 0) {
+  clearInterval(heartbeatInterval);
+  clearMcpHeartbeat();
+  process.exit(code);
+}
+
+process.on("exit", () => clearMcpHeartbeat());
+process.on("SIGINT", () => shutdown(0));
+process.on("SIGTERM", () => shutdown(0));
 
 process.stdin.on("data", (chunk: Buffer) => {
   buffer = Buffer.concat([buffer, chunk]);
@@ -68,7 +67,12 @@ function processBuffer() {
 
     const payload = buffer.subarray(messageStart, totalLength).toString("utf8");
     buffer = buffer.subarray(totalLength);
-    void handleMessage(JSON.parse(payload) as JsonRpcRequest);
+
+    try {
+      void handleMessage(JSON.parse(payload) as JsonRpcRequest);
+    } catch {
+      writeError(null, -32700, "Invalid JSON");
+    }
   }
 }
 
@@ -188,12 +192,11 @@ async function handleToolCall(message: JsonRpcRequest) {
         return writeError(message.id ?? null, -32602, `Unknown tool: ${name}`);
     }
   } catch (error) {
-    const messageText = error instanceof Error ? error.message : "Tool call failed";
-    return writeError(message.id ?? null, -32000, messageText);
+    return writeError(message.id ?? null, -32000, error instanceof Error ? error.message : "Tool call failed");
   }
 }
 
-async function apiFetch(requestPath: string, init?: RequestInit) {
+async function apiFetch(requestPath: string, init: RequestInit = {}) {
   if (!employeeToken) {
     employeeToken = await loginEmployee();
   }
@@ -203,7 +206,7 @@ async function apiFetch(requestPath: string, init?: RequestInit) {
     headers: {
       Authorization: `Bearer ${employeeToken}`,
       "Content-Type": "application/json",
-      ...((init?.headers ?? {}) as Record<string, string>)
+      ...((init.headers ?? {}) as Record<string, string>)
     }
   });
 
@@ -261,7 +264,7 @@ function safeJsonParse(text: string) {
 }
 
 function writeToolResult(id: JsonRpcId, payload: unknown) {
-  return writeResult(id, {
+  writeResult(id, {
     content: [
       {
         type: "text",

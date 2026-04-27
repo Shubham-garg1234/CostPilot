@@ -34,10 +34,11 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
   const cursorConfig = {
     mcpServers: {
       costpilot: {
+        type: "stdio",
         command: "npx",
-        args: ["-y", "--package=github:Shubham-garg1234/TokenGuard#main", "costpilot-mcp"],
+        args: ["-y", "github:Shubham-garg1234/CostPilot_MCP"],
         env: {
-          COSTPILOT_API_URL: input.apiBaseUrl,
+          COSTPILOT_API_URL: process.env.COSTPILOT_API_URL,
           COSTPILOT_EMPLOYEE_EMAIL: user.email,
           COSTPILOT_EMPLOYEE_PASSWORD: "paste-your-password-here"
         }
@@ -71,4 +72,18 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
     })),
     cursorConfig
   };
+}
+
+function getCursorApiUrl(apiBaseUrl: string) {
+  const trimmed = apiBaseUrl.trim();
+
+  if (!trimmed) {
+    return "http://localhost:4000/";
+  }
+
+  if (trimmed.startsWith("http://127.0.0.1:4000")) {
+    return "http://localhost:4000/";
+  }
+
+  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
 }
