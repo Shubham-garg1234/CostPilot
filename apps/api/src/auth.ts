@@ -3,6 +3,7 @@ import { RoleKey } from "@prisma/client";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { getEnvConfig } from "./config.js";
 import { verifyEmployeeAccessToken } from "./services/employee-auth-service.js";
+import { ManagedGatewayAuthError, resolveManagedGatewayAuth } from "./services/managed-gateway-service.js";
 
 const clerkClient = createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY ?? "sk_test_placeholder"
@@ -85,6 +86,23 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   };
 }
 
+export async function authenticateManagedCursorGateway(request: FastifyRequest, reply: FastifyReply) {
+  const presentedKey = extractManagedGatewayKey(request);
+  if (!presentedKey) {
+    return reply.status(401).send({ message: "Missing managed gateway key." });
+  }
+
+  try {
+    request.auth = await resolveManagedGatewayAuth(request.server, presentedKey);
+  } catch (error) {
+    if (error instanceof ManagedGatewayAuthError) {
+      return reply.status(error.statusCode).send({ message: error.message });
+    }
+
+    throw error;
+  }
+}
+
 function extractBearerToken(request: FastifyRequest) {
   const header = request.headers.authorization;
   if (!header) {
@@ -92,6 +110,20 @@ function extractBearerToken(request: FastifyRequest) {
   }
 
   return header.replace("Bearer ", "").trim();
+}
+
+function extractManagedGatewayKey(request: FastifyRequest) {
+  const apiKeyHeader = request.headers["api-key"];
+  if (typeof apiKeyHeader === "string" && apiKeyHeader.trim()) {
+    return apiKeyHeader.trim();
+  }
+
+  const authorization = request.headers.authorization;
+  if (authorization?.toLowerCase().startsWith("bearer ")) {
+    return authorization.slice("Bearer ".length).trim();
+  }
+
+  return "";
 }
 
 async function verifyClerkToken(token: string) {

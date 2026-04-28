@@ -3,6 +3,8 @@ import { estimateProviderUsage, fetchWithTimeout, parseProviderError, requirePro
 
 export async function generateGeminiResponse(request: LlmProviderRequest): Promise<LlmProviderResponse> {
   const apiKey = process.env.GEMINI_API_KEY;
+  const prompt =
+    request.messages?.map((entry) => `${entry.role.toUpperCase()}: ${entry.content}`).join("\n\n").trim() || request.prompt;
 
   if (!apiKey && shouldUseMockProvider()) {
     return estimateProviderUsage({ ...request, provider: "gemini" }, 0.5);
@@ -16,7 +18,7 @@ export async function generateGeminiResponse(request: LlmProviderRequest): Promi
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: request.prompt }] }]
+        contents: [{ parts: [{ text: prompt }] }]
       })
     }
   );
@@ -35,7 +37,7 @@ export async function generateGeminiResponse(request: LlmProviderRequest): Promi
     provider: "gemini",
     model: request.model,
     output,
-    promptTokens: payload.usageMetadata?.promptTokenCount ?? Math.max(1, Math.ceil(request.prompt.length / 4)),
+    promptTokens: payload.usageMetadata?.promptTokenCount ?? Math.max(1, Math.ceil(prompt.length / 4)),
     completionTokens: payload.usageMetadata?.candidatesTokenCount ?? Math.max(1, Math.ceil(output.length / 4))
   };
 }

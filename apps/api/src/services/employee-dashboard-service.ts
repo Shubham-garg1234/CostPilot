@@ -1,4 +1,7 @@
+import { ManagedClientType } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
+import { buildCursorManagedConfig } from "./cursor-managed-config.js";
+import { getManagedGatewayKeyForUser } from "./managed-gateway-service.js";
 
 export async function getEmployeeDashboard(app: FastifyInstance, input: {
   orgId: string;
@@ -10,7 +13,7 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
     throw new Error("PostgreSQL is unavailable.");
   }
 
-  const [totals, recentEvents, user] = await Promise.all([
+  const [totals, recentEvents, user, managedGatewayKey] = await Promise.all([
     app.prisma.usageEvent.aggregate({
       where: { orgId: input.orgId, userId: input.userId },
       _sum: { totalTokens: true, costUsd: true },
@@ -24,6 +27,12 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
     app.prisma.user.findUnique({
       where: { id: input.userId },
       include: { organization: true }
+    }),
+    getManagedGatewayKeyForUser(app, {
+      orgId: input.orgId,
+      userId: input.userId,
+      clientType: ManagedClientType.CURSOR,
+      includeSecret: true
     })
   ]);
 
@@ -31,14 +40,14 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
     throw new Error("User not found.");
   }
 
-  const cursorConfig = {
+  const fallbackMcpConfig = {
     mcpServers: {
       costpilot: {
         type: "stdio",
         command: "npx",
-        args: ["-y", "github:Shubham-garg1234/CostPilot_MCP"],
+        args: ["-y", "--package=github:Shubham-garg1234/CostPilot_MCP", "costpilot-mcp"],
         env: {
-          COSTPILOT_API_URL: process.env.COSTPILOT_API_URL,
+          COSTPILOT_API_URL: input.apiBaseUrl,
           COSTPILOT_EMPLOYEE_EMAIL: user.email,
           COSTPILOT_EMPLOYEE_PASSWORD: "paste-your-password-here"
         }
@@ -66,24 +75,23 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
       provider: event.provider,
       category: event.category,
       feature: event.feature,
+      status: event.status,
       totalTokens: event.totalTokens,
       costUsd: Number(event.costUsd),
       createdAt: event.createdAt.toISOString()
     })),
-    cursorConfig
+    compliance: {
+      governedCursorRequired: user.organization.governedCursorRequired,
+      state: user.cursorComplianceStatus,
+      lastGovernedRequestAt: user.lastGovernedCursorRequestAt?.toISOString() ?? null,
+      activeKey: managedGatewayKey?.key ?? null
+    },
+    cursorManagedConfig: buildCursorManagedConfig(input.apiBaseUrl, {
+      gatewayKey: managedGatewayKey?.key ?? null,
+      plaintextKey: managedGatewayKey?.secret ?? null,
+      complianceState: user.cursorComplianceStatus,
+      lastGovernedRequestAt: user.lastGovernedCursorRequestAt?.toISOString() ?? null
+    }),
+    fallbackMcpConfig
   };
-}
-
-function getCursorApiUrl(apiBaseUrl: string) {
-  const trimmed = apiBaseUrl.trim();
-
-  if (!trimmed) {
-    return "http://localhost:4000/";
-  }
-
-  if (trimmed.startsWith("http://127.0.0.1:4000")) {
-    return "http://localhost:4000/";
-  }
-
-  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
 }

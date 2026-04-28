@@ -3,6 +3,14 @@ import { estimateProviderUsage, fetchWithTimeout, parseProviderError, requirePro
 
 export async function generateAnthropicResponse(request: LlmProviderRequest): Promise<LlmProviderResponse> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
+  const systemPrompt = request.messages?.filter((entry) => entry.role === "system").map((entry) => entry.content).join("\n\n").trim();
+  const messages =
+    request.messages
+      ?.filter((entry) => entry.role !== "system")
+      .map((entry) => ({
+        role: entry.role === "assistant" ? "assistant" : "user",
+        content: entry.content
+      })) ?? [{ role: "user", content: request.prompt }];
 
   if (!apiKey && shouldUseMockProvider()) {
     return estimateProviderUsage({ ...request, provider: "anthropic" }, 0.6);
@@ -17,8 +25,10 @@ export async function generateAnthropicResponse(request: LlmProviderRequest): Pr
     },
     body: JSON.stringify({
       model: request.model,
-      max_tokens: 1024,
-      messages: [{ role: "user", content: request.prompt }]
+      system: systemPrompt || undefined,
+      max_tokens: request.maxTokens ?? 1024,
+      temperature: request.temperature,
+      messages
     })
   });
 

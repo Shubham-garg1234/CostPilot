@@ -1,15 +1,17 @@
 import type Redis from "ioredis";
 import type Stripe from "stripe";
-import type { IntegrationType, PrismaClient, RoleKey, UsageSource } from "@prisma/client";
+import type { IntegrationType, ManagedClientType, PrismaClient, RoleKey, UsageSource } from "@prisma/client";
 
 export type AuthContext = {
   userId: string;
   orgId: string;
   role: RoleKey;
-  authMode: "clerk" | "employee";
+  authMode: "clerk" | "employee" | "managed_gateway";
   teamId?: string | null;
   email?: string;
   name?: string;
+  gatewayKeyId?: string;
+  managedClientType?: ManagedClientType | null;
 };
 
 export type LlmProxyRequest = {
@@ -74,7 +76,13 @@ export type LlmProviderRequest = {
   provider: "openai" | "anthropic" | "gemini";
   model: string;
   prompt: string;
+  messages?: Array<{
+    role: "system" | "user" | "assistant" | "tool";
+    content: string;
+  }>;
   metadata?: Record<string, unknown>;
+  temperature?: number;
+  maxTokens?: number;
 };
 
 export type LlmProviderResponse = {

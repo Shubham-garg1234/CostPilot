@@ -54,7 +54,7 @@ export function EmployeeLoginForm() {
         <p className="text-sm text-slate-500">Employee Login</p>
         <h1 className="mt-3 font-display text-4xl font-semibold">Sign in with your employee credentials</h1>
         <p className="mt-3 text-slate-600">
-          Your organization adds you to CostPilot and shares your email and password. Use them here to open your employee dashboard and MCP setup.
+          Your organization adds you to CostPilot and shares your email and password. Use them here to open your employee dashboard and governed Cursor setup.
         </p>
         <div className="mt-6 grid gap-4">
           <input

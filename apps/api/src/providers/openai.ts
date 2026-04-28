@@ -3,6 +3,7 @@ import { estimateProviderUsage, fetchWithTimeout, parseProviderError, requirePro
 
 export async function generateOpenAIResponse(request: LlmProviderRequest): Promise<LlmProviderResponse> {
   const apiKey = process.env.OPENAI_API_KEY ?? process.env.LLM_PROVIDER_API_KEY;
+  const messages = request.messages ?? [{ role: "user", content: request.prompt }];
 
   if (!apiKey && shouldUseMockProvider()) {
     return estimateProviderUsage({ ...request, provider: "openai" }, 0.55);
@@ -16,7 +17,9 @@ export async function generateOpenAIResponse(request: LlmProviderRequest): Promi
     },
     body: JSON.stringify({
       model: request.model,
-      messages: [{ role: "user", content: request.prompt }]
+      messages,
+      temperature: request.temperature,
+      max_tokens: request.maxTokens
     })
   });
 

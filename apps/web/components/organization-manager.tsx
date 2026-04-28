@@ -7,11 +7,56 @@ import { Card, Pill } from "./ui";
 import { ApiError, requestJson } from "../lib/api";
 
 type OrganizationSnapshot = {
-  organization: { id: string; name: string; slug: string; createdAt: string };
+  organization: {
+    id: string;
+    name: string;
+    slug: string;
+    governedCursorRequired: boolean;
+    createdAt: string;
+  };
   teams: Array<{ id: string; name: string; departmentCode?: string | null; userCount: number }>;
-  users: Array<{ id: string; email: string; name: string; role: string; teamId?: string | null; hasPassword: boolean }>;
+  users: Array<{
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    teamId?: string | null;
+    hasPassword: boolean;
+    cursorComplianceStatus: string;
+    cursorComplianceUpdatedAt?: string | null;
+    lastGovernedCursorRequestAt?: string | null;
+    managedCursorKey?: {
+      id: string;
+      name: string;
+      clientType: string;
+      status: string;
+      secretPreview: string;
+      expiresAt?: string | null;
+      lastUsedAt?: string | null;
+    } | null;
+  }>;
   policies: Array<{ id: string }>;
 };
+
+type ManagedGatewayMutation = {
+  secret?: string;
+  key?: {
+    id: string;
+    status: string;
+    secretPreview: string;
+  };
+};
+
+function dateTime(value?: string | null) {
+  if (!value) {
+    return "Not seen yet";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
 
 export function OrganizationManager() {
   const { isLoaded, isSignedIn } = useAuth();
@@ -27,6 +72,7 @@ export function OrganizationManager() {
   const [slugTouched, setSlugTouched] = useState(false);
   const [status, setStatus] = useState("Checking your workspace...");
   const [submitting, setSubmitting] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<{ userId: string; secret: string } | null>(null);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -164,6 +210,108 @@ export function OrganizationManager() {
     }
   }
 
+  async function updateGovernedCursorRequired(governedCursorRequired: boolean) {
+    try {
+      setSubmitting(true);
+      await requestJson("/api/managed-gateway/governance/cursor", {
+        authMode: "clerk",
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ governedCursorRequired })
+      });
+      setStatus(governedCursorRequired ? "Managed Cursor governance is now required." : "Managed Cursor governance is now optional.");
+      await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to update governed Cursor setting.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function issueManagedKey(userId: string) {
+    try {
+      setSubmitting(true);
+      const payload = await requestJson<ManagedGatewayMutation>("/api/managed-gateway/keys", {
+        authMode: "clerk",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          userId,
+          name: "Managed Cursor Key",
+          clientType: "CURSOR"
+        })
+      });
+      setRevealedSecret(payload.secret ? { userId, secret: payload.secret } : null);
+      setStatus("Issued a managed Cursor gateway key.");
+      await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to issue managed gateway key.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function rotateManagedKey(userId: string, keyId: string) {
+    try {
+      setSubmitting(true);
+      const payload = await requestJson<ManagedGatewayMutation>(`/api/managed-gateway/keys/${keyId}/rotate`, {
+        authMode: "clerk",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({})
+      });
+      setRevealedSecret(payload.secret ? { userId, secret: payload.secret } : null);
+      setStatus("Rotated the managed Cursor gateway key.");
+      await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to rotate managed gateway key.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function revokeManagedKey(keyId: string) {
+    try {
+      setSubmitting(true);
+      await requestJson(`/api/managed-gateway/keys/${keyId}/revoke`, {
+        authMode: "clerk",
+        method: "POST"
+      });
+      setStatus("Revoked the managed Cursor gateway key.");
+      await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to revoke managed gateway key.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function updateCompliance(userId: string, complianceStatus: "COMPLIANT" | "NON_COMPLIANT") {
+    try {
+      setSubmitting(true);
+      await requestJson(`/api/managed-gateway/users/${userId}/compliance`, {
+        authMode: "clerk",
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ complianceStatus })
+      });
+      setStatus(`Marked employee as ${complianceStatus.toLowerCase().replace("_", " ")}.`);
+      await load();
+    } catch (error) {
+      setStatus(error instanceof ApiError ? error.message : "Unable to update compliance state.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const signedOut = isLoaded && !isSignedIn;
   const organizationLocked = snapshot
     ? snapshot.teams.length > 0 || snapshot.users.length > 1 || snapshot.policies.length > 0
@@ -185,10 +333,11 @@ export function OrganizationManager() {
         <p className="mt-4 text-sm text-slate-600">{status}</p>
         {signedOut ? (
           <div className="mt-6 rounded-[20px] border border-dashed border-black/10 bg-white/70 px-4 py-4 text-sm text-slate-600">
-            Use the dedicated <Link href="/organization/login" className="font-medium text-slate-900 underline">organization login</Link> route
-            to enter the admin workspace.
+            Use the dedicated <Link href="/organization/login" className="font-medium text-slate-900 underline">organization login</Link>
+            {" "}route to enter the admin workspace.
           </div>
         ) : null}
+
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           <label className="rounded-[20px] bg-white/80 p-4 text-sm">
             <span className="mb-2 block text-slate-500">Org name</span>
@@ -228,6 +377,32 @@ export function OrganizationManager() {
             ? "Organization name and slug are locked for now after setup."
             : "Set the organization name and slug first. You can add teams and employees after that."}
         </p>
+
+        <Card className="mt-6 border border-black/5 bg-white/70 p-5 shadow-none">
+          <p className="text-sm text-slate-500">Governed Cursor Access</p>
+          <h2 className="mt-2 font-display text-2xl font-semibold">
+            {snapshot?.organization.governedCursorRequired ? "Required" : "Optional"}
+          </h2>
+          <p className="mt-3 text-sm text-slate-600">
+            Managed Cursor routes supported Azure/OpenAI-compatible chat traffic through CostPilot. Cursor features that depend on Cursor-managed specialized models can still bypass this path, so MCP stays available for observability and fallback imports.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              onClick={() => void updateGovernedCursorRequired(true)}
+              disabled={!snapshot || submitting || snapshot.organization.governedCursorRequired}
+              className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Require Governed Cursor
+            </button>
+            <button
+              onClick={() => void updateGovernedCursorRequired(false)}
+              disabled={!snapshot || submitting || !snapshot.organization.governedCursorRequired}
+              className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:bg-stone-100"
+            >
+              Mark Optional
+            </button>
+          </div>
+        </Card>
 
         <div className="mt-8 grid gap-3">
           {snapshot?.teams.length ? (
@@ -277,19 +452,19 @@ export function OrganizationManager() {
             <input value={userEmail} onChange={(event) => setUserEmail(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" />
             <label className="grid gap-2 text-sm text-slate-600">
               <span>Select team</span>
-            <select
-              value={selectedTeamId}
-              onChange={(event) => setSelectedTeamId(event.target.value)}
-              className="rounded-xl border border-black/10 px-3 py-2"
-              disabled={!snapshot?.teams.length}
-            >
-              <option value="">{snapshot?.teams.length ? "Select team" : "Create a team first"}</option>
-              {snapshot?.teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}{team.departmentCode ? ` (${team.departmentCode})` : ""}
-                </option>
-              ))}
-            </select>
+              <select
+                value={selectedTeamId}
+                onChange={(event) => setSelectedTeamId(event.target.value)}
+                className="rounded-xl border border-black/10 px-3 py-2"
+                disabled={!snapshot?.teams.length}
+              >
+                <option value="">{snapshot?.teams.length ? "Select team" : "Create a team first"}</option>
+                {snapshot?.teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}{team.departmentCode ? ` (${team.departmentCode})` : ""}
+                  </option>
+                ))}
+              </select>
             </label>
             <select value={userRole} onChange={(event) => setUserRole(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2">
               {["ADMIN", "MANAGER", "SDE1", "SDE2", "INTERN"].map((role) => (
@@ -307,14 +482,82 @@ export function OrganizationManager() {
             </button>
           </div>
           <p className="mt-3 text-xs text-slate-500">Every employee must belong to a team so reporting and policy ownership stay clean.</p>
-          <div className="mt-5 space-y-2">
+        </Card>
+
+        <Card className="p-6">
+          <p className="text-sm text-slate-500">Managed Cursor Users</p>
+          <div className="mt-5 space-y-3">
             {snapshot?.users.length ? (
-              snapshot.users.map((user) => (
-                <div key={user.id} className="rounded-[18px] bg-stone-100 px-4 py-3 text-sm">
-                  <p className="font-medium">{user.name}</p>
-                  <p className="text-slate-500">{user.email} - {user.role} - {user.hasPassword ? "employee login ready" : "password pending"}</p>
-                </div>
-              ))
+              snapshot.users.map((user) => {
+                const activeKey = user.managedCursorKey?.status === "ACTIVE" ? user.managedCursorKey : null;
+                const userSecret = revealedSecret?.userId === user.id ? revealedSecret.secret : null;
+
+                return (
+                  <div key={user.id} className="rounded-[18px] bg-stone-100 px-4 py-4 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{user.name}</p>
+                        <p className="text-slate-500">{user.email} / {user.role}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Pill>{user.cursorComplianceStatus}</Pill>
+                        <Pill>{activeKey ? activeKey.status : "NO_ACTIVE_KEY"}</Pill>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 text-slate-600">
+                      <p>Last governed request: {dateTime(user.lastGovernedCursorRequestAt)}</p>
+                      <p>Key preview: {user.managedCursorKey?.secretPreview ? `...${user.managedCursorKey.secretPreview}` : "Not issued yet"}</p>
+                      <p>Key last used: {dateTime(user.managedCursorKey?.lastUsedAt)}</p>
+                    </div>
+
+                    {userSecret ? (
+                      <div className="mt-3 rounded-[16px] bg-stone-950 p-3 text-xs text-stone-100">
+                        <p className="text-stone-400">Newest managed key</p>
+                        <pre className="mt-2 overflow-auto whitespace-pre-wrap break-all">{userSecret}</pre>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        onClick={() => void issueManagedKey(user.id)}
+                        disabled={submitting || Boolean(activeKey)}
+                        className="rounded-full bg-black px-4 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        Issue Key
+                      </button>
+                      <button
+                        onClick={() => activeKey && void rotateManagedKey(user.id, activeKey.id)}
+                        disabled={submitting || !activeKey}
+                        className="rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:bg-stone-100"
+                      >
+                        Rotate Key
+                      </button>
+                      <button
+                        onClick={() => activeKey && void revokeManagedKey(activeKey.id)}
+                        disabled={submitting || !activeKey}
+                        className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-medium text-rose-700 disabled:cursor-not-allowed disabled:bg-stone-100"
+                      >
+                        Revoke Key
+                      </button>
+                      <button
+                        onClick={() => void updateCompliance(user.id, "COMPLIANT")}
+                        disabled={submitting}
+                        className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-medium text-emerald-700 disabled:cursor-not-allowed disabled:bg-stone-100"
+                      >
+                        Mark Compliant
+                      </button>
+                      <button
+                        onClick={() => void updateCompliance(user.id, "NON_COMPLIANT")}
+                        disabled={submitting}
+                        className="rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-medium text-amber-700 disabled:cursor-not-allowed disabled:bg-stone-100"
+                      >
+                        Mark Non-Compliant
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
             ) : (
               <div className="rounded-[18px] border border-dashed border-black/10 bg-stone-50 px-4 py-4 text-sm text-slate-600">
                 {signedOut ? "Sign in to manage users." : "No users added yet. Invite your first teammate here."}

@@ -7,6 +7,8 @@ import { registerBillingRoutes } from "./routes/billing.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerOrganizationRoutes } from "./routes/organizations.js";
 import { registerUsageEventRoutes } from "./routes/usage-events.js";
+import { registerManagedGatewayRoutes } from "./routes/managed-gateway.js";
+import { registerCursorGatewayRoutes } from "./routes/cursor-gateway.js";
 import { getEnvConfig } from "./config.js";
 import { readMcpHeartbeat } from "./services/mcp-status-service.js";
 
@@ -57,7 +59,9 @@ export async function buildApp() {
 
   await registerAuthRoutes(app);
   await registerOrganizationRoutes(app);
+  await registerManagedGatewayRoutes(app);
   await registerLlmProxyRoutes(app);
+  await registerCursorGatewayRoutes(app);
   await registerUsageEventRoutes(app);
   await registerDashboardRoutes(app);
   await registerPolicyRoutes(app);

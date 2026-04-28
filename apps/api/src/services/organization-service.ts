@@ -1,6 +1,7 @@
-import { RoleKey, ViolationAction } from "@prisma/client";
+import { ManagedClientType, RoleKey, ViolationAction } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { createPasswordHash, generateTemporaryPassword } from "./employee-auth-service.js";
+import { serializeManagedGatewayKey } from "./managed-gateway-service.js";
 import { sendEmployeeCredentialsEmail } from "./mailer-service.js";
 
 export class OrganizationConflictError extends Error {
@@ -22,10 +23,22 @@ export type OrganizationSnapshot = {
     id: string;
     name: string;
     slug: string;
+    governedCursorRequired: boolean;
     createdAt: string;
   };
   teams: Array<{ id: string; name: string; departmentCode?: string | null; userCount: number }>;
-  users: Array<{ id: string; email: string; name: string; role: RoleKey; teamId?: string | null; hasPassword: boolean }>;
+  users: Array<{
+    id: string;
+    email: string;
+    name: string;
+    role: RoleKey;
+    teamId?: string | null;
+    hasPassword: boolean;
+    cursorComplianceStatus: string;
+    cursorComplianceUpdatedAt?: string | null;
+    lastGovernedCursorRequestAt?: string | null;
+    managedCursorKey?: ReturnType<typeof serializeManagedGatewayKey> | null;
+  }>;
   policies: Array<{
     id: string;
     role: RoleKey;
@@ -53,7 +66,18 @@ export async function getOrganizationSnapshot(app: FastifyInstance, orgId: strin
           }
         }
       },
-      users: true,
+      users: {
+        include: {
+          managedGatewayKeys: {
+            where: {
+              clientType: ManagedClientType.CURSOR
+            },
+            orderBy: {
+              createdAt: "desc"
+            }
+          }
+        }
+      },
       policies: true
     }
   });
@@ -67,6 +91,7 @@ export async function getOrganizationSnapshot(app: FastifyInstance, orgId: strin
       id: organization.id,
       name: organization.name,
       slug: organization.slug,
+      governedCursorRequired: organization.governedCursorRequired,
       createdAt: organization.createdAt.toISOString()
     },
     teams: organization.teams.map((team) => ({
@@ -81,7 +106,11 @@ export async function getOrganizationSnapshot(app: FastifyInstance, orgId: strin
       name: user.fullName,
       role: user.role,
       teamId: user.teamId,
-      hasPassword: Boolean(user.passwordHash)
+      hasPassword: Boolean(user.passwordHash),
+      cursorComplianceStatus: user.cursorComplianceStatus,
+      cursorComplianceUpdatedAt: user.cursorComplianceUpdatedAt?.toISOString() ?? null,
+      lastGovernedCursorRequestAt: user.lastGovernedCursorRequestAt?.toISOString() ?? null,
+      managedCursorKey: user.managedGatewayKeys[0] ? serializeManagedGatewayKey(user.managedGatewayKeys[0]) : null
     })),
     policies: organization.policies.map((policy) => ({
       id: policy.id,

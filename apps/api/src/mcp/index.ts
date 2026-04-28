@@ -95,30 +95,6 @@ async function handleMessage(message: JsonRpcRequest) {
       return writeResult(message.id ?? null, {
         tools: [
           {
-            name: "track_usage_event",
-            description: "Record token, cost, category, and source metadata in CostPilot.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                model: { type: "string" },
-                provider: { type: "string", enum: ["openai", "anthropic", "gemini"] },
-                category: { type: "string" },
-                feature: { type: "string" },
-                source: { type: "string" },
-                integrationType: { type: "string" },
-                workspaceId: { type: "string" },
-                sessionId: { type: "string" },
-                requestId: { type: "string" },
-                promptTokens: { type: "number" },
-                completionTokens: { type: "number" },
-                totalTokens: { type: "number" },
-                costUsd: { type: "number" },
-                metadata: { type: "object" }
-              },
-              required: ["model", "provider", "category"]
-            }
-          },
-          {
             name: "get_usage_summary",
             description: "Fetch usage totals and grouped breakdowns from CostPilot.",
             inputSchema: {
@@ -145,6 +121,30 @@ async function handleMessage(message: JsonRpcRequest) {
             inputSchema: {
               type: "object",
               properties: {}
+            }
+          },
+          {
+            name: "track_usage_event",
+            description: "Fallback/manual ingestion tool for recording token, cost, category, and source metadata in CostPilot.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                model: { type: "string" },
+                provider: { type: "string", enum: ["openai", "anthropic", "gemini"] },
+                category: { type: "string" },
+                feature: { type: "string" },
+                source: { type: "string" },
+                integrationType: { type: "string" },
+                workspaceId: { type: "string" },
+                sessionId: { type: "string" },
+                requestId: { type: "string" },
+                promptTokens: { type: "number" },
+                completionTokens: { type: "number" },
+                totalTokens: { type: "number" },
+                costUsd: { type: "number" },
+                metadata: { type: "object" }
+              },
+              required: ["model", "provider", "category"]
             }
           }
         ]

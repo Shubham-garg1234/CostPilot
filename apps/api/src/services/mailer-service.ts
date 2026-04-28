@@ -36,7 +36,8 @@ export async function sendEmployeeCredentialsEmail(input: {
       `Email: ${input.to}`,
       `Password: ${input.password}`,
       "",
-      "After signing in, you can copy your Cursor MCP configuration directly from the employee dashboard."
+      "After signing in, open the employee dashboard to copy your governed Cursor setup.",
+      "A fallback MCP configuration is also available there for observability and manual imports."
     ].join("\n")
   });
 

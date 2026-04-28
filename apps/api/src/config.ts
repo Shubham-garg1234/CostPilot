@@ -57,6 +57,7 @@ export const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   EMPLOYEE_AUTH_SECRET: z.string().min(1).default("employee_auth_dev_secret"),
+  MANAGED_GATEWAY_ENCRYPTION_SECRET: z.string().min(1).default("managed_gateway_dev_secret"),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().optional(),
   SMTP_SECURE: envBoolean.default(false),
@@ -93,7 +94,7 @@ export const parsedEnvSchema = envSchema.superRefine((env, ctx) => {
     ["STRIPE_WEBHOOK_SECRET", env.STRIPE_WEBHOOK_SECRET, "whsec_placeholder"],
     ["CLERK_SECRET_KEY", env.CLERK_SECRET_KEY, "sk_test_placeholder"],
     ["EMPLOYEE_AUTH_SECRET", env.EMPLOYEE_AUTH_SECRET, "employee_auth_dev_secret"],
-    ["LLM_PROVIDER_API_KEY", env.LLM_PROVIDER_API_KEY, "provider_placeholder"]
+    ["MANAGED_GATEWAY_ENCRYPTION_SECRET", env.MANAGED_GATEWAY_ENCRYPTION_SECRET, "managed_gateway_dev_secret"]
   ] as const;
 
   for (const [key, value, placeholder] of disallowedPlaceholders) {
@@ -116,6 +117,16 @@ export const parsedEnvSchema = envSchema.superRefine((env, ctx) => {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "NEXT_PUBLIC_API_URL is required in production."
+    });
+  }
+
+  const hasOpenAiKey = Boolean(env.OPENAI_API_KEY?.trim());
+  const hasGenericProviderKey = env.LLM_PROVIDER_API_KEY !== "provider_placeholder";
+  if (!hasOpenAiKey && !hasGenericProviderKey) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "Configure OPENAI_API_KEY or LLM_PROVIDER_API_KEY in production so governed OpenAI-compatible requests can execute."
     });
   }
 

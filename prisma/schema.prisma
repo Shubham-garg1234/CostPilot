@@ -59,23 +59,43 @@ enum IntegrationType {
   OBSERVABILITY
 }
 
+enum ManagedClientType {
+  CURSOR
+  CLAUDE
+  OTHER
+}
+
+enum ManagedGatewayKeyStatus {
+  ACTIVE
+  REVOKED
+  ROTATED
+}
+
+enum ManagedCursorComplianceStatus {
+  PENDING
+  COMPLIANT
+  NON_COMPLIANT
+}
+
 model Organization {
-  id               String               @id @default(cuid())
-  name             String
-  slug             String               @unique
-  stripeCustomerId String?              @unique
-  monthlyBudgetUsd Decimal?             @db.Decimal(12, 2)
-  markupPercentage Decimal              @default(0) @db.Decimal(5, 2)
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
-  teams            Team[]
-  users            User[]
-  policies         Policy[]
-  violations       Violation[]
-  billingRecords   BillingRecord[]
-  usageEvents      UsageEvent[]
-  usageAggregates  UsageAggregate[]
-  apiKeys          OrganizationApiKey[]
+  id                     String             @id @default(cuid())
+  name                   String
+  slug                   String             @unique
+  stripeCustomerId       String?            @unique
+  monthlyBudgetUsd       Decimal?           @db.Decimal(12, 2)
+  markupPercentage       Decimal            @default(0) @db.Decimal(5, 2)
+  governedCursorRequired Boolean            @default(false)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  teams                  Team[]
+  users                  User[]
+  policies               Policy[]
+  violations             Violation[]
+  billingRecords         BillingRecord[]
+  usageEvents            UsageEvent[]
+  usageAggregates        UsageAggregate[]
+  apiKeys                OrganizationApiKey[]
+  managedGatewayKeys     ManagedGatewayKey[]
 }
 
 model Team {
@@ -92,22 +112,26 @@ model Team {
 }
 
 model User {
-  id              String           @id @default(cuid())
-  clerkUserId     String?          @unique
-  email           String           @unique
-  fullName        String
-  organizationId  String
-  teamId          String?
-  role            RoleKey
-  passwordHash    String?
-  passwordSetAt   DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  team            Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  violations      Violation[]
-  usageEvents     UsageEvent[]
-  usageAggregates UsageAggregate[]
+  id                         String                          @id @default(cuid())
+  clerkUserId                String?                         @unique
+  email                      String                          @unique
+  fullName                   String
+  organizationId             String
+  teamId                     String?
+  role                       RoleKey
+  passwordHash               String?
+  passwordSetAt              DateTime?
+  cursorComplianceStatus     ManagedCursorComplianceStatus   @default(PENDING)
+  cursorComplianceUpdatedAt  DateTime?
+  lastGovernedCursorRequestAt DateTime?
+  createdAt                  DateTime                        @default(now())
+  updatedAt                  DateTime                        @updatedAt
+  organization               Organization                    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team                       Team?                           @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  violations                 Violation[]
+  usageEvents                UsageEvent[]
+  usageAggregates            UsageAggregate[]
+  managedGatewayKeys         ManagedGatewayKey[]
 }
 
 model Policy {
@@ -243,4 +267,25 @@ model OrganizationApiKey {
   encryptedKey String
   createdAt    DateTime      @default(now())
   organization Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model ManagedGatewayKey {
+  id              String                  @id @default(cuid())
+  userId          String
+  orgId           String
+  name            String
+  clientType      ManagedClientType       @default(CURSOR)
+  encryptedSecret String
+  secretPreview   String
+  status          ManagedGatewayKeyStatus @default(ACTIVE)
+  issuedBy        String?
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  organization    Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, clientType, status])
+  @@index([userId, clientType, status])
 }
