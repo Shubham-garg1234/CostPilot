@@ -3,6 +3,7 @@ import { RoleKey } from "@prisma/client";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { getEnvConfig } from "./config.js";
 import { verifyEmployeeAccessToken } from "./services/employee-auth-service.js";
+import type { AuthContext } from "./types.js";
 
 const clerkClient = createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY ?? "sk_test_placeholder"
@@ -38,32 +39,15 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     return reply.status(503).send({ message: "PostgreSQL is unavailable." });
   }
 
-  const clerkUserId = verified.sub;
-  const clerkUser = await clerkClient.users.getUser(clerkUserId).catch(() => null);
-  const primaryEmail =
-    clerkUser?.primaryEmailAddressId
-      ? clerkUser.emailAddresses.find((entry) => entry.id === clerkUser.primaryEmailAddressId)?.emailAddress
-      : clerkUser?.emailAddresses[0]?.emailAddress;
-  const fullName = [clerkUser?.firstName, clerkUser?.lastName].filter(Boolean).join(" ").trim();
+  const identity = await getClerkIdentity(verified.sub);
 
-  let dbUser = await request.server.prisma.user.findFirst({
-    where: {
-      OR: [
-        { clerkUserId },
-        ...(primaryEmail ? [{ email: primaryEmail }] : [])
-      ]
-    },
-    include: {
-      team: true,
-      organization: true
-    }
-  }).catch(() => null);
+  let dbUser = await findDbUserForClerkIdentity(request, identity);
 
   if (!dbUser) {
     dbUser = await bootstrapInitialUser({
-      clerkUserId,
-      primaryEmail,
-      fullName,
+      clerkUserId: identity.clerkUserId,
+      primaryEmail: identity.primaryEmail,
+      fullName: identity.fullName,
       prisma: request.server.prisma
     });
   }
@@ -80,8 +64,56 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     role: dbUser.role,
     authMode: "clerk",
     teamId: dbUser.teamId,
-    email: dbUser.email ?? primaryEmail,
-    name: dbUser.fullName || fullName || clerkUser?.username || clerkUserId
+    email: dbUser.email ?? identity.primaryEmail,
+    name: dbUser.fullName || identity.displayName
+  };
+}
+
+export async function authenticateOrganizationSetup(request: FastifyRequest, reply: FastifyReply) {
+  const env = getEnvConfig();
+  const token = extractBearerToken(request);
+  if (!token) {
+    return reply.status(401).send({ message: "Missing access token." });
+  }
+
+  const employeeToken = verifyEmployeeAccessToken(token, env.EMPLOYEE_AUTH_SECRET);
+  if (employeeToken) {
+    request.auth = {
+      userId: employeeToken.userId,
+      orgId: employeeToken.orgId,
+      role: employeeToken.role,
+      authMode: "employee",
+      teamId: employeeToken.teamId,
+      email: employeeToken.email,
+      name: employeeToken.name
+    };
+    return;
+  }
+
+  const verified = await verifyClerkToken(token);
+  if (!verified?.sub) {
+    return reply.status(401).send({ message: "Invalid Clerk session token." });
+  }
+
+  if (!request.server.prisma) {
+    return reply.status(503).send({ message: "PostgreSQL is unavailable." });
+  }
+
+  const identity = await getClerkIdentity(verified.sub);
+  const dbUser = await findDbUserForClerkIdentity(request, identity);
+  if (dbUser) {
+    request.auth = toAuthContext(dbUser, identity);
+    return;
+  }
+
+  if (!identity.primaryEmail) {
+    return reply.status(403).send({ message: "Your Clerk account needs an email before creating an organization." });
+  }
+
+  request.organizationSetupAuth = {
+    clerkUserId: identity.clerkUserId,
+    email: identity.primaryEmail,
+    name: identity.displayName
   };
 }
 
@@ -129,6 +161,55 @@ function normalizeClerkJwtKey(value?: string) {
   }
 
   return trimmed;
+}
+
+async function getClerkIdentity(clerkUserId: string) {
+  const clerkUser = await clerkClient.users.getUser(clerkUserId).catch(() => null);
+  const primaryEmail =
+    clerkUser?.primaryEmailAddressId
+      ? clerkUser.emailAddresses.find((entry) => entry.id === clerkUser.primaryEmailAddressId)?.emailAddress
+      : clerkUser?.emailAddresses[0]?.emailAddress;
+  const fullName = [clerkUser?.firstName, clerkUser?.lastName].filter(Boolean).join(" ").trim();
+
+  return {
+    clerkUserId,
+    primaryEmail,
+    fullName,
+    displayName: fullName || primaryEmail || clerkUser?.username || clerkUserId
+  };
+}
+
+async function findDbUserForClerkIdentity(
+  request: FastifyRequest,
+  identity: Awaited<ReturnType<typeof getClerkIdentity>>
+) {
+  return await request.server.prisma?.user.findFirst({
+    where: {
+      OR: [
+        { clerkUserId: identity.clerkUserId },
+        ...(identity.primaryEmail ? [{ email: identity.primaryEmail }] : [])
+      ]
+    },
+    include: {
+      team: true,
+      organization: true
+    }
+  }).catch(() => null);
+}
+
+function toAuthContext(
+  dbUser: NonNullable<Awaited<ReturnType<typeof findDbUserForClerkIdentity>>>,
+  identity: Awaited<ReturnType<typeof getClerkIdentity>>
+): AuthContext {
+  return {
+    userId: dbUser.id,
+    orgId: dbUser.organizationId,
+    role: dbUser.role,
+    authMode: "clerk",
+    teamId: dbUser.teamId,
+    email: dbUser.email ?? identity.primaryEmail,
+    name: dbUser.fullName || identity.displayName
+  };
 }
 
 async function bootstrapInitialUser(input: {

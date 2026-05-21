@@ -175,6 +175,38 @@ export async function createOrganizationRecord(
   };
 }
 
+export async function createOrganizationWithAdminUser(
+  app: FastifyInstance,
+  input: { name: string; slug: string; clerkUserId: string; email: string; fullName: string }
+) {
+  if (!app.prisma) {
+    throw new Error("PostgreSQL is unavailable.");
+  }
+
+  const organization = await app.prisma.organization.create({
+    data: {
+      name: input.name,
+      slug: input.slug,
+      users: {
+        create: {
+          clerkUserId: input.clerkUserId,
+          email: input.email,
+          fullName: input.fullName,
+          role: RoleKey.ADMIN
+        }
+      }
+    }
+  });
+
+  return {
+    id: organization.id,
+    name: organization.name,
+    slug: organization.slug,
+    createdAt: organization.createdAt.toISOString(),
+    created: true
+  };
+}
+
 export async function createTeamRecord(
   app: FastifyInstance,
   input: { organizationId: string; name: string; departmentCode?: string }

@@ -12,6 +12,12 @@ export type AuthContext = {
   name?: string;
 };
 
+export type OrganizationSetupAuthContext = {
+  clerkUserId: string;
+  email: string;
+  name: string;
+};
+
 export type LlmProxyRequest = {
   prompt: string;
   model: string;
@@ -127,6 +133,7 @@ declare module "fastify" {
 
   interface FastifyRequest {
     auth: AuthContext;
+    organizationSetupAuth?: OrganizationSetupAuthContext;
   }
 }
 

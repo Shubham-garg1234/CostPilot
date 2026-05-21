@@ -1,10 +1,11 @@
 import { Prisma, RoleKey } from "@prisma/client";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
-import { authenticate } from "../auth.js";
+import { authenticate, authenticateOrganizationSetup } from "../auth.js";
 import {
   OrganizationConflictError,
   OrganizationNotFoundError,
+  createOrganizationWithAdminUser,
   createOrganizationRecord,
   createTeamRecord,
   createUserRecord,
@@ -46,20 +47,28 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/api/organizations", { preHandler: [authenticate] }, async (request, reply) => {
-    if (request.auth.role !== RoleKey.ADMIN) {
+  app.post("/api/organizations", { preHandler: [authenticateOrganizationSetup] }, async (request, reply) => {
+    if (request.auth && request.auth.role !== RoleKey.ADMIN) {
       return reply.status(403).send({ message: "Only admins can create organizations." });
     }
 
     const body = organizationSchema.parse(request.body);
 
     try {
-      const organization = await createOrganizationRecord(app, {
-        name: body.name,
-        slug: body.slug,
-        currentOrgId: request.auth.orgId,
-        actorUserId: request.auth.userId
-      });
+      const organization = request.auth
+        ? await createOrganizationRecord(app, {
+            name: body.name,
+            slug: body.slug,
+            currentOrgId: request.auth.orgId,
+            actorUserId: request.auth.userId
+          })
+        : await createOrganizationWithAdminUser(app, {
+            name: body.name,
+            slug: body.slug,
+            clerkUserId: request.organizationSetupAuth!.clerkUserId,
+            email: request.organizationSetupAuth!.email,
+            fullName: request.organizationSetupAuth!.name
+          });
 
       return reply.status(organization.created ? 201 : 200).send(organization);
     } catch (error) {

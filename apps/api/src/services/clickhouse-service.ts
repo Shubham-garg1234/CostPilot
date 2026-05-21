@@ -8,6 +8,8 @@ type ClickHouseEnv = {
   CLICKHOUSE_DATABASE: string;
 };
 
+const CLICKHOUSE_REQUEST_TIMEOUT_MS = 5000;
+
 export async function createClickHouseClient(
   env: ClickHouseEnv,
   app?: FastifyInstance
@@ -20,7 +22,8 @@ export async function createClickHouseClient(
     async ping() {
       const response = await fetch(endpoint.toString(), {
         method: "GET",
-        headers: baseHeaders
+        headers: baseHeaders,
+        signal: AbortSignal.timeout(CLICKHOUSE_REQUEST_TIMEOUT_MS)
       });
 
       if (!response.ok) {
@@ -38,6 +41,7 @@ export async function createClickHouseClient(
           ...baseHeaders,
           "Content-Type": "application/json"
         },
+        signal: AbortSignal.timeout(CLICKHOUSE_REQUEST_TIMEOUT_MS),
         body: `INSERT INTO ${database}.usage_events FORMAT JSONEachRow\n${JSON.stringify(formatPayload(payload))}`
       });
 
@@ -94,6 +98,7 @@ async function ensureAnalyticsTable(
   const createDatabaseResponse = await fetch(endpoint.toString(), {
     method: "POST",
     headers,
+    signal: AbortSignal.timeout(CLICKHOUSE_REQUEST_TIMEOUT_MS),
     body: createDatabaseQuery
   });
 
@@ -107,6 +112,7 @@ async function ensureAnalyticsTable(
   const createTableResponse = await fetch(endpoint.toString(), {
     method: "POST",
     headers,
+    signal: AbortSignal.timeout(CLICKHOUSE_REQUEST_TIMEOUT_MS),
     body: createTableQuery
   });
 

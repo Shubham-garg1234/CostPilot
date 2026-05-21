@@ -34,7 +34,7 @@ function start(command) {
   return child;
 }
 
-function shutdown(signal) {
+function shutdown() {
   if (shuttingDown) {
     return;
   }
@@ -49,8 +49,8 @@ function shutdown(signal) {
   setTimeout(() => process.exit(0), 100).unref();
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
-start("npm --prefix apps/api run dev");
-start("npm --prefix apps/api run dev:mcp");
+start("npm run dev:api");
+start("npm run dev:web");
