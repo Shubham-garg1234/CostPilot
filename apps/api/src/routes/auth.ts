@@ -3,6 +3,10 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { authenticate } from "../auth.js";
 import { getEnvConfig } from "../config.js";
 import { createEmployeeAccessToken, verifyPassword } from "../services/employee-auth-service.js";
+import {
+  completeEmployeePasswordReset,
+  requestEmployeePasswordReset
+} from "../services/employee-password-reset-service.js";
 import { getEmployeeDashboard } from "../services/employee-dashboard-service.js";
 import { getOrganizationSnapshot } from "../services/organization-service.js";
 import { z } from "zod";
@@ -10,6 +14,15 @@ import { z } from "zod";
 const employeeLoginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6)
+});
+
+const employeeForgotPasswordSchema = z.object({
+  email: z.string().email()
+});
+
+const employeeResetPasswordSchema = z.object({
+  token: z.string().min(32),
+  password: z.string().min(8).max(128)
 });
 
 export async function registerAuthRoutes(app: FastifyInstance) {
@@ -64,6 +77,61 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     };
   });
 
+  app.post("/api/auth/employee-forgot-password", async (request, reply) => {
+    if (!app.prisma) {
+      return reply.status(503).send({ message: "PostgreSQL is unavailable." });
+    }
+
+    const body = employeeForgotPasswordSchema.parse(request.body);
+    const env = getEnvConfig();
+    const webBase = resolveEmployeeWebBaseUrl(request, env);
+    if (!webBase) {
+      return reply.status(503).send({
+        message:
+          "Password reset is not available: set NEXT_PUBLIC_APP_URL in the API environment, or submit this form from the CostPilot web app in your browser."
+      });
+    }
+
+    const result = await requestEmployeePasswordReset(app, {
+      email: body.email,
+      webBaseUrl: webBase
+    });
+
+    if (!result.sent) {
+      return reply.status(503).send({
+        message:
+          result.reason === "SMTP is not configured."
+            ? "Password reset email is not available because outbound email is not configured on this server. Contact your organization administrator."
+            : "Unable to send the reset email right now. Try again later or contact your administrator."
+      });
+    }
+
+    return {
+      message: "If that email is registered as an employee account, we sent password reset instructions."
+    };
+  });
+
+  app.post("/api/auth/employee-reset-password", async (request, reply) => {
+    if (!app.prisma) {
+      return reply.status(503).send({ message: "PostgreSQL is unavailable." });
+    }
+
+    const body = employeeResetPasswordSchema.parse(request.body);
+    const outcome = await completeEmployeePasswordReset(app, {
+      token: body.token,
+      newPassword: body.password
+    });
+
+    if (!outcome.ok) {
+      return reply.status(400).send({ message: outcome.message });
+    }
+
+    return {
+      ok: true,
+      message: "Your password was updated. You can sign in with your new password."
+    };
+  });
+
   app.get("/api/auth/session", { preHandler: [authenticate] }, async (request, reply) => {
     const env = getEnvConfig();
     if (!app.prisma) {
@@ -98,6 +166,24 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.post("/api/auth/logout", async () => {
     return { ok: true };
   });
+}
+
+function resolveEmployeeWebBaseUrl(request: FastifyRequest, env: ReturnType<typeof getEnvConfig>): string | null {
+  const fromEnv = env.NEXT_PUBLIC_APP_URL?.trim();
+  if (fromEnv) {
+    return fromEnv.replace(/\/$/, "");
+  }
+
+  const origin = request.headers.origin;
+  if (origin && /^https?:\/\//i.test(origin)) {
+    try {
+      return new URL(origin).origin.replace(/\/$/, "");
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 function resolvePublicApiBaseUrl(

@@ -5,17 +5,12 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { Card, Pill } from "./ui";
 import { ApiError, requestJson } from "../lib/api";
-
-type OrganizationSnapshot = {
-  organization: { id: string; name: string; slug: string; createdAt: string };
-  teams: Array<{ id: string; name: string; departmentCode?: string | null; userCount: number }>;
-  users: Array<{ id: string; email: string; name: string; role: string; teamId?: string | null; hasPassword: boolean }>;
-  policies: Array<{ id: string }>;
-};
+import { useOrganizationWorkspace } from "./organization-workspace-provider";
 
 export function OrganizationManager() {
   const { isLoaded, isSignedIn } = useAuth();
-  const [snapshot, setSnapshot] = useState<OrganizationSnapshot | null>(null);
+  const { organization: organizationSlice, ensureOrganization } = useOrganizationWorkspace();
+  const snapshot = organizationSlice.data;
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
   const [teamName, setTeamName] = useState("AI Enablement");
@@ -34,13 +29,20 @@ export function OrganizationManager() {
     }
 
     if (!isSignedIn) {
-      setSnapshot(null);
       setStatus("Sign in through organization login to create or manage your organization.");
       return;
     }
 
-    void load();
-  }, [isLoaded, isSignedIn]);
+    void ensureOrganization().then((payload) => {
+      if (payload) {
+        setOrgName((current) => current || payload.organization.name);
+        setOrgSlug((current) => current || payload.organization.slug);
+        setStatus(`Loaded ${payload.organization.name}`);
+      } else if (organizationSlice.error) {
+        setStatus(organizationSlice.error);
+      }
+    });
+  }, [isLoaded, isSignedIn, ensureOrganization, organizationSlice.error]);
 
   useEffect(() => {
     if (slugTouched) {
@@ -59,16 +61,14 @@ export function OrganizationManager() {
     setSelectedTeamId((current) => (current && snapshot.teams.some((team) => team.id === current) ? current : snapshot.teams[0]?.id ?? ""));
   }, [snapshot]);
 
-  async function load() {
-    try {
-      const payload = await requestJson<OrganizationSnapshot>("/api/organizations/current", { authMode: "clerk" });
-      setSnapshot(payload);
+  async function refreshOrganization() {
+    const payload = await ensureOrganization({ force: true });
+    if (payload) {
       setOrgName((current) => current || payload.organization.name);
       setOrgSlug((current) => current || payload.organization.slug);
       setStatus(`Loaded ${payload.organization.name}`);
-    } catch (error) {
-      setSnapshot(null);
-      setStatus(error instanceof ApiError ? error.message : "Unable to load organization.");
+    } else if (organizationSlice.error) {
+      setStatus(organizationSlice.error);
     }
   }
 
@@ -89,7 +89,7 @@ export function OrganizationManager() {
         body: JSON.stringify({ name: orgName, slug: orgSlug })
       });
       setStatus(payload.created ? `Created organization ${payload.name}` : `Saved organization details for ${payload.name}`);
-      await load();
+      await refreshOrganization();
     } catch (error) {
       setStatus(error instanceof ApiError ? error.message : "Unable to save organization details.");
     } finally {
@@ -117,7 +117,7 @@ export function OrganizationManager() {
         })
       });
       setStatus(`Created team ${teamName}`);
-      await load();
+      await refreshOrganization();
     } catch (error) {
       setStatus(error instanceof ApiError ? error.message : "Unable to create team.");
     } finally {
@@ -156,7 +156,7 @@ export function OrganizationManager() {
           ? `Added ${userName}. Credentials were emailed automatically.`
           : `Added ${userName}. Temporary password: ${payload.temporaryPassword ?? "generated"}. ${payload.emailDeliveryNote ?? ""}`.trim()
       );
-      await load();
+      await refreshOrganization();
     } catch (error) {
       setStatus(error instanceof ApiError ? error.message : "Unable to add user.");
     } finally {

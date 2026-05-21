@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { registerPlugins } from "./plugins.js";
 import { registerLlmProxyRoutes } from "./routes/llm-proxy.js";
+import { registerPromptEnhancementRoutes } from "./routes/prompt-enhancement.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
 import { registerPolicyRoutes } from "./routes/policies.js";
 import { registerBillingRoutes } from "./routes/billing.js";
@@ -13,6 +14,7 @@ import { readMcpHeartbeat } from "./services/mcp-status-service.js";
 export async function buildApp() {
   const env = getEnvConfig();
   const app = Fastify({
+    pluginTimeout: 120_000,
     logger:
       env.NODE_ENV === "production"
         ? true
@@ -58,6 +60,7 @@ export async function buildApp() {
   await registerAuthRoutes(app);
   await registerOrganizationRoutes(app);
   await registerLlmProxyRoutes(app);
+  await registerPromptEnhancementRoutes(app);
   await registerUsageEventRoutes(app);
   await registerDashboardRoutes(app);
   await registerPolicyRoutes(app);

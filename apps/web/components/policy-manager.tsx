@@ -4,21 +4,12 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { Card, Pill } from "./ui";
 import { ApiError, requestJson } from "../lib/api";
-
-type PolicyRecord = {
-  id: string;
-  role: string;
-  category: string;
-  feature?: string | null;
-  allowedModels: string[];
-  actionOnViolation: string;
-  maxRequestsPerHour?: number | null;
-  maxTokensPerDay?: number | null;
-};
+import { useOrganizationWorkspace } from "./organization-workspace-provider";
 
 export function PolicyManager() {
   const { isLoaded, isSignedIn } = useAuth();
-  const [policies, setPolicies] = useState<PolicyRecord[]>([]);
+  const { policies: policiesSlice, ensurePolicies } = useOrganizationWorkspace();
+  const policies = policiesSlice.data ?? [];
   const [role, setRole] = useState("SDE1");
   const [category, setCategory] = useState("email_generation");
   const [feature, setFeature] = useState("auto_reply");
@@ -36,18 +27,19 @@ export function PolicyManager() {
       return;
     }
 
-    void load();
-  }, [isLoaded, isSignedIn]);
-
-  async function load() {
-    try {
-      const payload = await requestJson<PolicyRecord[]>("/api/policies", { authMode: "clerk" });
-      setPolicies(payload);
-      setStatus(`Loaded ${payload.length} policies`);
-    } catch (error) {
-      setStatus(error instanceof ApiError ? error.message : "Unable to load policies.");
+    if (policiesSlice.status === "ready" && policiesSlice.data) {
+      setStatus(`Loaded ${policiesSlice.data.length} policies`);
+      return;
     }
-  }
+
+    void ensurePolicies().then((payload) => {
+      if (payload) {
+        setStatus(`Loaded ${payload.length} policies`);
+      } else if (policiesSlice.error) {
+        setStatus(policiesSlice.error);
+      }
+    });
+  }, [isLoaded, isSignedIn, ensurePolicies, policiesSlice.data, policiesSlice.error, policiesSlice.status]);
 
   async function createPolicy() {
     try {
@@ -70,7 +62,10 @@ export function PolicyManager() {
         })
       });
       setStatus(`Created ${role} policy for ${category}`);
-      await load();
+      const payload = await ensurePolicies({ force: true });
+      if (payload) {
+        setStatus(`Loaded ${payload.length} policies`);
+      }
     } catch (error) {
       setStatus(error instanceof ApiError ? error.message : "Unable to create policy.");
     }

@@ -1,24 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useEffect } from "react";
 import { RefreshCcw } from "lucide-react";
 import { Card, Pill } from "./ui";
-import { ApiError, requestJson } from "../lib/api";
-
-type BillingRecord = {
-  id: string;
-  periodStart: string;
-  rawCostUsd: number;
-  markupPercentage: number;
-  finalCostUsd: number;
-  status: string;
-};
-
-type BillingResponse = {
-  records: BillingRecord[];
-};
-
+import { useOrganizationWorkspace } from "./organization-workspace-provider";
 function money(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 }
@@ -28,37 +13,19 @@ function monthLabel(value: string) {
 }
 
 export function BillingDashboard() {
-  const { isLoaded, isSignedIn } = useAuth();
-  const [records, setRecords] = useState<BillingRecord[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [error, setError] = useState("Unable to load billing records.");
+  const { authReady, billing, ensureBilling } = useOrganizationWorkspace();
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!authReady) {
       return;
     }
 
-    if (!isSignedIn) {
-      setStatus("error");
-      setError("Sign in to load billing records.");
-      return;
-    }
+    void ensureBilling();
+  }, [authReady, ensureBilling]);
 
-    void load();
-  }, [isLoaded, isSignedIn]);
-
-  async function load() {
-    try {
-      setStatus("loading");
-      const payload = await requestJson<BillingResponse>("/api/billing/current", { authMode: "clerk" });
-      setRecords(payload.records);
-      setStatus("ready");
-    } catch (issue) {
-      setStatus("error");
-      setError(issue instanceof ApiError ? issue.message : "Unable to load billing records.");
-    }
-  }
-
+  const records = billing.data?.records ?? [];
+  const status = billing.status === "idle" ? "loading" : billing.status;
+  const error = billing.error || "Unable to load billing records.";
   const latest = records[0];
 
   return (
@@ -77,7 +44,7 @@ export function BillingDashboard() {
         ) : status === "error" ? (
           <div className="mt-8 rounded-[24px] border border-rose-200 bg-rose-50 p-5 text-rose-900">
             <p className="font-medium">{error}</p>
-            <button onClick={() => void load()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-black px-4 py-2 text-sm font-medium text-white">
+            <button onClick={() => void ensureBilling({ force: true })} className="mt-4 inline-flex items-center gap-2 rounded-full bg-black px-4 py-2 text-sm font-medium text-white">
               <RefreshCcw className="h-4 w-4" />
               Retry
             </button>

@@ -53,6 +53,7 @@ export const envSchema = z.object({
   CLERK_PUBLISHABLE_KEY: z.string().optional(),
   CLERK_AUTHORIZED_PARTIES: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  PROMPT_ENHANCEMENT_MODEL: z.string().min(1).default("gpt-4.1-mini"),
   LLM_PROVIDER_API_KEY: z.string().min(1).default("provider_placeholder"),
   ANTHROPIC_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),

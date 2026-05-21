@@ -19,11 +19,15 @@ type LoginResponse = {
   };
 };
 
-export function EmployeeLoginForm() {
+export function EmployeeLoginForm({ initialNotice }: { initialNotice?: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [status, setStatus] = useState("Use the employee credentials shared by your organization.");
+  const [status, setStatus] = useState(
+    initialNotice === "password-reset"
+      ? "Your password was updated. Sign in with your new password."
+      : "Use the employee credentials shared by your organization."
+  );
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
@@ -72,7 +76,7 @@ export function EmployeeLoginForm() {
           />
         </div>
         <p className="mt-4 text-sm text-slate-600">{status}</p>
-        <div className="mt-6 flex flex-wrap gap-3">
+        <div className="mt-6 flex flex-wrap items-center gap-3">
           <button
             onClick={() => void submit()}
             disabled={submitting || !email.includes("@") || password.length < 6}
@@ -85,6 +89,9 @@ export function EmployeeLoginForm() {
             className="rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-medium text-slate-700"
           >
             Organization login
+          </Link>
+          <Link href="/employee/forgot-password" className="text-sm font-medium text-slate-600 underline-offset-4 hover:underline">
+            Forgot password?
           </Link>
         </div>
       </Card>
