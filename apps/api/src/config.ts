@@ -46,6 +46,7 @@ export const envSchema = z.object({
   CLICKHOUSE_USERNAME: z.string().min(1).default("default"),
   CLICKHOUSE_PASSWORD: z.string().default(""),
   CLICKHOUSE_DATABASE: z.string().min(1).default("costpilot"),
+  CLICKHOUSE_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300_000).default(30_000),
   STRIPE_SECRET_KEY: z.string().min(1).default("sk_test_placeholder"),
   STRIPE_WEBHOOK_SECRET: z.string().min(1).default("whsec_placeholder"),
   CLERK_SECRET_KEY: z.string().min(1).default("sk_test_placeholder"),

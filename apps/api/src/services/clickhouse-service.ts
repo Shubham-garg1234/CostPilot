@@ -6,9 +6,8 @@ type ClickHouseEnv = {
   CLICKHOUSE_USERNAME: string;
   CLICKHOUSE_PASSWORD: string;
   CLICKHOUSE_DATABASE: string;
+  CLICKHOUSE_REQUEST_TIMEOUT_MS: number;
 };
-
-const CLICKHOUSE_REQUEST_TIMEOUT_MS = 5000;
 
 export async function createClickHouseClient(
   env: ClickHouseEnv,
@@ -17,13 +16,14 @@ export async function createClickHouseClient(
   const endpoint = new URL(env.CLICKHOUSE_URL);
   const database = env.CLICKHOUSE_DATABASE;
   const baseHeaders = buildHeaders(env);
+  const requestTimeoutMs = env.CLICKHOUSE_REQUEST_TIMEOUT_MS;
 
   return {
     async ping() {
       const response = await fetch(endpoint.toString(), {
         method: "GET",
         headers: baseHeaders,
-        signal: AbortSignal.timeout(CLICKHOUSE_REQUEST_TIMEOUT_MS)
+        signal: AbortSignal.timeout(requestTimeoutMs)
       });
 
       if (!response.ok) {
@@ -31,17 +31,17 @@ export async function createClickHouseClient(
       }
     },
     async ensureSchema() {
-      await ensureAnalyticsTable(endpoint, database, baseHeaders, app);
+      await ensureAnalyticsTable(endpoint, database, baseHeaders, requestTimeoutMs, app);
     },
     async insertUsageEvent(payload) {
-      await ensureAnalyticsTable(endpoint, database, baseHeaders, app);
+      await ensureAnalyticsTable(endpoint, database, baseHeaders, requestTimeoutMs, app);
       const response = await fetch(endpoint.toString(), {
         method: "POST",
         headers: {
           ...baseHeaders,
           "Content-Type": "application/json"
         },
-        signal: AbortSignal.timeout(CLICKHOUSE_REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(requestTimeoutMs),
         body: `INSERT INTO ${database}.usage_events FORMAT JSONEachRow\n${JSON.stringify(formatPayload(payload))}`
       });
 
@@ -59,6 +59,7 @@ async function ensureAnalyticsTable(
   endpoint: URL,
   database: string,
   headers: HeadersInit,
+  requestTimeoutMs: number,
   app?: FastifyInstance
 ) {
   if (analyticsTableReady) {
@@ -98,7 +99,7 @@ async function ensureAnalyticsTable(
   const createDatabaseResponse = await fetch(endpoint.toString(), {
     method: "POST",
     headers,
-    signal: AbortSignal.timeout(CLICKHOUSE_REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(requestTimeoutMs),
     body: createDatabaseQuery
   });
 
@@ -112,7 +113,7 @@ async function ensureAnalyticsTable(
   const createTableResponse = await fetch(endpoint.toString(), {
     method: "POST",
     headers,
-    signal: AbortSignal.timeout(CLICKHOUSE_REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(requestTimeoutMs),
     body: createTableQuery
   });
 
