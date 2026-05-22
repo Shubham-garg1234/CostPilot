@@ -106,6 +106,7 @@ export async function registerUsageEventRoutes(app: FastifyInstance) {
     const where = {
       orgId: request.auth.orgId,
       createdAt: { gte: since },
+      ...(request.auth.authMode === "employee" ? { userId: request.auth.userId } : {}),
       ...(query.source ? { source: normalizeUsageSource(query.source) } : {}),
       ...(query.category ? { category: query.category } : {}),
       ...(query.provider ? { provider: query.provider } : {})

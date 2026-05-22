@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { registerTokenGetter } from "../lib/api";
+import { clearEmployeeAccessToken, registerTokenGetter } from "../lib/api";
 
 export function ClerkTokenBridge() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
+  const wasSignedIn = useRef(false);
 
   useEffect(() => {
     registerTokenGetter(async () => {
@@ -20,6 +21,18 @@ export function ClerkTokenBridge() {
       registerTokenGetter(null);
     };
   }, [getToken, isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    if (wasSignedIn.current && !isSignedIn) {
+      clearEmployeeAccessToken();
+    }
+
+    wasSignedIn.current = Boolean(isSignedIn);
+  }, [isLoaded, isSignedIn]);
 
   return null;
 }

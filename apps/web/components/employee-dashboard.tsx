@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { costpilotMcpRulesMdc } from "../lib/costpilot-employee-mcp-content";
 import { ApiError, clearEmployeeAccessToken, getEmployeeAccessToken, requestJson } from "../lib/api";
+import { signOutEmployee } from "../lib/auth-session";
+import { formatCostUsd } from "../lib/currency";
+import { EmployeeMcpTools } from "./employee-mcp-tools";
 import { Card, Pill } from "./ui";
 
 type EmployeeDashboardPayload = {
@@ -31,10 +34,6 @@ type EmployeeDashboardPayload = {
   }>;
   cursorConfig: unknown;
 };
-
-function money(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
-}
 
 export function EmployeeDashboard() {
   const [data, setData] = useState<EmployeeDashboardPayload | null>(null);
@@ -93,10 +92,10 @@ export function EmployeeDashboard() {
   }
 
   function signOut() {
-    clearEmployeeAccessToken();
-    setData(null);
-    setCheckedAuth(true);
-    setStatus("Signed out.");
+    void signOutEmployee({
+      signOutClerk: window.Clerk?.loaded ? () => window.Clerk?.signOut?.() : undefined,
+      redirectTo: "/employee/login"
+    });
   }
 
   if (checkedAuth && !data) {
@@ -155,7 +154,8 @@ export function EmployeeDashboard() {
             </Card>
             <Card className="p-6">
               <p className="text-sm text-slate-500">Spend</p>
-              <p className="mt-3 text-4xl font-semibold">{money(data.usage.totalCostUsd)}</p>
+              <p className="mt-3 text-4xl font-semibold">{formatCostUsd(data.usage.totalCostUsd)}</p>
+              <p className="mt-1 text-xs text-slate-500">Shown to {formatCostUsd(0.00001)} (5 decimal places)</p>
             </Card>
           </section>
 
@@ -246,7 +246,7 @@ export function EmployeeDashboard() {
                     <div key={event.id} className="rounded-[20px] bg-white/80 px-4 py-4 text-sm">
                       <div className="flex items-center justify-between gap-4">
                         <p className="font-medium">{event.model}</p>
-                        <span>{money(event.costUsd)}</span>
+                        <span>{formatCostUsd(event.costUsd)}</span>
                       </div>
                       <p className="mt-2 text-slate-500">
                         {event.provider} · {event.category} · {Intl.NumberFormat("en-US").format(event.totalTokens)} tokens
@@ -261,6 +261,8 @@ export function EmployeeDashboard() {
               </div>
             </Card>
           </section>
+
+          <EmployeeMcpTools />
 
           <section className="grid gap-6">
             <Card className="p-6">

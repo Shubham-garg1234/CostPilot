@@ -55,9 +55,13 @@ declare global {
   interface Window {
     Clerk?: {
       loaded?: boolean;
+      user?: {
+        primaryEmailAddress?: { emailAddress?: string };
+      };
       session?: {
         getToken: () => Promise<string | null>;
       };
+      signOut?: () => Promise<void>;
     };
   }
 }
@@ -65,15 +69,31 @@ declare global {
 export async function buildAuthHeaders(mode: AuthMode = "auto") {
   const headers: Record<string, string> = {};
 
-  if (mode !== "none") {
-    const employeeToken = getEmployeeAccessToken();
-    if (employeeToken && (mode === "auto" || mode === "employee")) {
-      headers.Authorization = `Bearer ${employeeToken}`;
-      return headers;
-    }
+  if (mode === "none") {
+    return headers;
   }
 
-  if (mode === "employee" || mode === "none") {
+  if (mode === "employee") {
+    const employeeToken = getEmployeeAccessToken();
+    if (employeeToken) {
+      headers.Authorization = `Bearer ${employeeToken}`;
+    }
+    return headers;
+  }
+
+  if (mode === "clerk") {
+    const clerkToken =
+      (await registeredTokenGetter?.().catch(() => null)) ??
+      (window.Clerk?.loaded ? await window.Clerk?.session?.getToken?.().catch(() => null) : null);
+    if (clerkToken) {
+      headers.Authorization = `Bearer ${clerkToken}`;
+    }
+    return headers;
+  }
+
+  const employeeToken = getEmployeeAccessToken();
+  if (employeeToken) {
+    headers.Authorization = `Bearer ${employeeToken}`;
     return headers;
   }
 

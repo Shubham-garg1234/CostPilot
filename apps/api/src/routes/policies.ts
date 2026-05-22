@@ -23,7 +23,10 @@ export async function registerPolicyRoutes(app: FastifyInstance) {
     }
 
     return app.prisma.policy.findMany({
-      where: { orgId: request.auth.orgId },
+      where: {
+        orgId: request.auth.orgId,
+        ...(request.auth.authMode === "employee" ? { role: request.auth.role } : {})
+      },
       orderBy: [{ role: "asc" }, { category: "asc" }]
     });
   });

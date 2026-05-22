@@ -38,7 +38,7 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
         command: "npx",
         args: ["-y", "github:Shubham-garg1234/CostPilot_MCP"],
         env: {
-          COSTPILOT_API_URL: process.env.COSTPILOT_API_URL,
+          COSTPILOT_API_URL: input.apiBaseUrl.replace(/\/$/, ""),
           COSTPILOT_EMPLOYEE_EMAIL: user.email,
           COSTPILOT_EMPLOYEE_PASSWORD: "paste-your-password-here"
         }
@@ -58,7 +58,7 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
     usage: {
       totalRequests: totals._count._all,
       totalTokens: totals._sum.totalTokens ?? 0,
-      totalCostUsd: Number(totals._sum.costUsd ?? 0)
+      totalCostUsd: roundCostUsd(totals._sum.costUsd ?? 0)
     },
     recentEvents: recentEvents.map((event) => ({
       id: event.id,
@@ -67,11 +67,16 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
       category: event.category,
       feature: event.feature,
       totalTokens: event.totalTokens,
-      costUsd: Number(event.costUsd),
+      costUsd: roundCostUsd(event.costUsd),
       createdAt: event.createdAt.toISOString()
     })),
     cursorConfig
   };
+}
+
+function roundCostUsd(value: number | { toNumber?: () => number } | null | undefined) {
+  const numeric = typeof value === "number" ? value : Number(value ?? 0);
+  return Number(numeric.toFixed(6));
 }
 
 function getCursorApiUrl(apiBaseUrl: string) {
