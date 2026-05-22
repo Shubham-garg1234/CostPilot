@@ -11,11 +11,33 @@ import type { DependencyState, MemoryRedisLike, UpstashRedisLike } from "./types
 
 type RedisClient = IORedis;
 
+/** Browsers send Origin as either localhost or 127.0.0.1; env often lists only one, which breaks CORS for the other. */
+function expandLocalDevOrigins(origin: string): string[] {
+  const trimmed = origin.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const variants = new Set<string>([trimmed]);
+  variants.add(trimmed.replace("://localhost:", "://127.0.0.1:"));
+  variants.add(trimmed.replace("://127.0.0.1:", "://localhost:"));
+  return [...variants];
+}
+
+function collectCorsOrigins(env: ReturnType<typeof getEnvConfig>): string[] {
+  const seeds = [env.NEXT_PUBLIC_APP_URL, env.NEXT_PUBLIC_API_URL].filter((o): o is string => Boolean(o?.trim()));
+  const out = new Set<string>();
+  for (const seed of seeds) {
+    for (const origin of expandLocalDevOrigins(seed)) {
+      out.add(origin);
+    }
+  }
+  return [...out];
+}
+
 export async function registerPlugins(app: FastifyInstance) {
   const env = getEnvConfig();
-  const allowedOrigins = [env.NEXT_PUBLIC_APP_URL, env.NEXT_PUBLIC_API_URL].filter(
-    (origin): origin is string => Boolean(origin)
-  );
+  const allowedOrigins = collectCorsOrigins(env);
 
   await app.register(cors, {
     origin: allowedOrigins.length === 0 ? true : allowedOrigins,

@@ -1,50 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useEffect } from "react";
 import { BellRing, RefreshCcw } from "lucide-react";
 import { Card, Pill } from "./ui";
-import { ApiError, requestJson } from "../lib/api";
-
-type DashboardSummary = {
-  recentViolations: Array<{ id: string; type: string; message: string; createdAt: string; actionTaken: string; role: string }>;
-};
+import { useOrganizationWorkspace } from "./organization-workspace-provider";
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 export function AlertsDashboard() {
-  const { isLoaded, isSignedIn } = useAuth();
-  const [items, setItems] = useState<DashboardSummary["recentViolations"]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [error, setError] = useState("Unable to load alerts.");
+  const { authReady, dashboard, ensureDashboard } = useOrganizationWorkspace();
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!authReady) {
       return;
     }
 
-    if (!isSignedIn) {
-      setStatus("error");
-      setError("Sign in to load alerts.");
-      return;
-    }
+    void ensureDashboard();
+  }, [authReady, ensureDashboard]);
 
-    void load();
-  }, [isLoaded, isSignedIn]);
-
-  async function load() {
-    try {
-      setStatus("loading");
-      const payload = await requestJson<DashboardSummary>("/api/dashboard/summary", { authMode: "clerk" });
-      setItems(payload.recentViolations);
-      setStatus("ready");
-    } catch (issue) {
-      setStatus("error");
-      setError(issue instanceof ApiError ? issue.message : "Unable to load alerts.");
-    }
-  }
+  const items = dashboard.data?.recentViolations ?? [];
+  const status = dashboard.status === "idle" ? "loading" : dashboard.status;
+  const error = dashboard.error || "Unable to load alerts.";
 
   return (
     <main className="space-y-6">
@@ -65,7 +43,7 @@ export function AlertsDashboard() {
       {status === "error" ? (
         <Card className="p-6">
           <p className="font-medium text-rose-900">{error}</p>
-          <button onClick={() => void load()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-black px-4 py-2 text-sm font-medium text-white">
+          <button onClick={() => void ensureDashboard({ force: true })} className="mt-4 inline-flex items-center gap-2 rounded-full bg-black px-4 py-2 text-sm font-medium text-white">
             <RefreshCcw className="h-4 w-4" />
             Retry
           </button>

@@ -1,19 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useEffect } from "react";
 import { AlertTriangle, BarChart3, DatabaseZap, RefreshCcw, ShieldCheck, Wallet } from "lucide-react";
 import { Card, Pill } from "./ui";
-import { ApiError, requestJson } from "../lib/api";
-
-type DashboardSummary = {
-  metrics: Array<{ label: string; value: string; trend: string }>;
-  topUsers: Array<{ id: string; name: string; role: string; category: string; costUsd: number; tokens: number; source?: string }>;
-  topFeatures: Array<{ feature: string; category: string; costUsd: number; tokens: number; provider?: string; source?: string }>;
-  sourceBreakdown: Array<{ source: string; costUsd: number; tokens: number; requests: number }>;
-  providerBreakdown: Array<{ provider: string; costUsd: number; tokens: number; requests: number }>;
-  recentViolations: Array<{ id: string; type: string; message: string; createdAt: string; actionTaken: string; role: string }>;
-};
+import { useOrganizationWorkspace } from "./organization-workspace-provider";
 
 function number(value: number) {
   return Intl.NumberFormat("en-US").format(value);
@@ -24,36 +14,19 @@ function currency(value: number) {
 }
 
 export function DashboardOverview() {
-  const { isLoaded, isSignedIn } = useAuth();
-  const [data, setData] = useState<DashboardSummary | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [error, setError] = useState("Unable to load dashboard data.");
+  const { authReady, dashboard, ensureDashboard } = useOrganizationWorkspace();
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!authReady) {
       return;
     }
 
-    if (!isSignedIn) {
-      setStatus("error");
-      setError("Sign in to load dashboard data.");
-      return;
-    }
+    void ensureDashboard();
+  }, [authReady, ensureDashboard]);
 
-    void load();
-  }, [isLoaded, isSignedIn]);
-
-  async function load() {
-    try {
-      setStatus("loading");
-      const payload = await requestJson<DashboardSummary>("/api/dashboard/summary", { authMode: "clerk" });
-      setData(payload);
-      setStatus("ready");
-    } catch (issue) {
-      setStatus("error");
-      setError(issue instanceof ApiError ? issue.message : "Unable to load dashboard data.");
-    }
-  }
+  const data = dashboard.data;
+  const status = dashboard.status === "idle" ? "loading" : dashboard.status;
+  const error = dashboard.error || "Unable to load dashboard data.";
 
   if (status === "loading") {
     return (
@@ -84,7 +57,7 @@ export function DashboardOverview() {
             <h1 className="mt-4 font-display text-4xl font-semibold">We could not load your production data.</h1>
             <p className="mt-3 max-w-2xl text-slate-600">{error}</p>
           </div>
-          <button onClick={() => void load()} className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 text-sm font-medium text-white">
+          <button onClick={() => void ensureDashboard({ force: true })} className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 text-sm font-medium text-white">
             <RefreshCcw className="h-4 w-4" />
             Retry
           </button>
@@ -215,7 +188,7 @@ export function DashboardOverview() {
               <div key={user.id} className="grid gap-3 rounded-[20px] border border-black/10 bg-white/80 px-4 py-4 md:grid-cols-[1.1fr_auto_auto_auto]">
                 <div>
                   <p className="font-medium">{user.name}</p>
-                  <p className="text-sm text-slate-500">{user.role} · {user.category}</p>
+                  <p className="text-sm text-slate-500">{user.role} -+ {user.category}</p>
                 </div>
                 <span className="text-sm text-slate-600">{user.source ?? "sdk"}</span>
                 <span className="text-sm text-slate-600">{number(user.tokens)} tokens</span>
@@ -242,7 +215,7 @@ export function DashboardOverview() {
                 </div>
                 <p className="mt-3 font-medium">{feature.feature}</p>
                 <p className="mt-2 text-sm text-slate-600">
-                  {feature.category} · {number(feature.tokens)} tokens · {feature.source ?? "all sources"}
+                  {feature.category} -+ {number(feature.tokens)} tokens -+ {feature.source ?? "all sources"}
                 </p>
               </div>
             ))}

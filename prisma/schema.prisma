@@ -92,22 +92,35 @@ model Team {
 }
 
 model User {
-  id              String           @id @default(cuid())
-  clerkUserId     String?          @unique
-  email           String           @unique
+  id              String                   @id @default(cuid())
+  clerkUserId     String?                  @unique
+  email           String                   @unique
   fullName        String
   organizationId  String
   teamId          String?
   role            RoleKey
   passwordHash    String?
   passwordSetAt   DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  team            Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  organization    Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team            Team?                    @relation(fields: [teamId], references: [id], onDelete: SetNull)
   violations      Violation[]
   usageEvents     UsageEvent[]
   usageAggregates UsageAggregate[]
+  passwordResets  EmployeePasswordReset[]
+}
+
+model EmployeePasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 model Policy {
