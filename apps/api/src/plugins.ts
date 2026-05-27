@@ -6,7 +6,6 @@ import Stripe from "stripe";
 import type { FastifyInstance } from "fastify";
 import { getEnvConfig } from "./config.js";
 import { createDb, type Db } from "./db/client.js";
-import { runMigrations } from "./db/migrate.js";
 import { createClickHouseClient } from "./services/clickhouse-service.js";
 import type { DependencyState, MemoryRedisLike, UpstashRedisLike } from "./types.js";
 
@@ -106,7 +105,6 @@ async function buildPostgresClient(app: FastifyInstance, states: DependencyState
 
   try {
     await db.connect();
-    await runMigrations(db);
     app.log.info("Connected to PostgreSQL");
     state.available = true;
     states.push(state);

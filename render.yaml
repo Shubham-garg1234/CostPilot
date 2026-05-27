@@ -54,6 +54,22 @@ services:
         sync: false
       - key: NEXT_PUBLIC_API_URL
         sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: SMTP_TIMEOUT_MS
+        value: "15000"
+      - key: EMPLOYEE_AUTH_SECRET
+        sync: false
 
   - type: web
     name: costpilot-web

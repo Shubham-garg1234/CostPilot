@@ -50,9 +50,13 @@ export async function requestEmployeePasswordReset(
       fullName: user.fullName,
       resetUrl
     });
-  } catch {
+  } catch (error) {
     await deletePasswordResetByTokenHash(app.db, tokenHash);
-    return { sent: false, reason: "Email delivery failed." };
+    const message = error instanceof Error ? error.message : "Email delivery failed.";
+    return {
+      sent: false,
+      reason: message.includes("timed out") ? "SMTP send timed out" : "Email delivery failed."
+    };
   }
 
   if (!emailResult.delivered) {

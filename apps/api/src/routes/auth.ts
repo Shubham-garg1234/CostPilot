@@ -86,23 +86,33 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       });
     }
 
-    const result = await requestEmployeePasswordReset(app, {
-      email: body.email,
-      webBaseUrl: webBase
-    });
+    try {
+      const result = await requestEmployeePasswordReset(app, {
+        email: body.email,
+        webBaseUrl: webBase
+      });
 
-    if (!result.sent) {
+      if (!result.sent) {
+        return reply.status(503).send({
+          message:
+            result.reason === "SMTP is not configured."
+              ? "Password reset email is not available because outbound email is not configured on this server. Contact your organization administrator."
+              : result.reason === "Email delivery failed." || result.reason === "SMTP send timed out"
+                ? "Unable to send the reset email (mail server timeout or connection issue). Try again later or contact your administrator."
+                : "Unable to send the reset email right now. Try again later or contact your administrator."
+        });
+      }
+
+      return {
+        message: "If that email is registered as an employee account, we sent password reset instructions."
+      };
+    } catch (error) {
+      request.log.error({ err: error }, "employee-forgot-password failed");
       return reply.status(503).send({
         message:
-          result.reason === "SMTP is not configured."
-            ? "Password reset email is not available because outbound email is not configured on this server. Contact your organization administrator."
-            : "Unable to send the reset email right now. Try again later or contact your administrator."
+          "Unable to process your password reset request right now. Try again in a few minutes or contact your administrator."
       });
     }
-
-    return {
-      message: "If that email is registered as an employee account, we sent password reset instructions."
-    };
   });
 
   app.post("/api/auth/employee-reset-password", async (request, reply) => {
@@ -111,19 +121,27 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
 
     const body = employeeResetPasswordSchema.parse(request.body);
-    const outcome = await completeEmployeePasswordReset(app, {
-      token: body.token,
-      newPassword: body.password
-    });
 
-    if (!outcome.ok) {
-      return reply.status(400).send({ message: outcome.message });
+    try {
+      const outcome = await completeEmployeePasswordReset(app, {
+        token: body.token,
+        newPassword: body.password
+      });
+
+      if (!outcome.ok) {
+        return reply.status(400).send({ message: outcome.message });
+      }
+
+      return {
+        ok: true,
+        message: "Your password was updated. You can sign in with your new password."
+      };
+    } catch (error) {
+      request.log.error({ err: error }, "employee-reset-password failed");
+      return reply.status(503).send({
+        message: "Unable to reset your password right now. Try again in a few minutes."
+      });
     }
-
-    return {
-      ok: true,
-      message: "Your password was updated. You can sign in with your new password."
-    };
   });
 
   app.get("/api/auth/session", { preHandler: [authenticate] }, async (request, reply) => {

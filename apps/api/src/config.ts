@@ -64,6 +64,7 @@ export const envSchema = z.object({
   SMTP_SECURE: envBoolean.default(false),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
+  SMTP_TIMEOUT_MS: z.coerce.number().int().min(3000).max(120_000).default(15_000),
   SLACK_WEBHOOK_URL: z.string().url().optional(),
   EMAIL_FROM: z.string().email().optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
