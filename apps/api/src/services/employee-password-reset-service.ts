@@ -1,5 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import {
+  completePasswordReset,
+  deletePasswordResetByTokenHash,
+  findValidPasswordReset,
+  replacePendingPasswordReset
+} from "../db/password-resets.js";
+import { findUserByEmailInsensitive } from "../db/users.js";
 import { createPasswordHash } from "./employee-auth-service.js";
 import { sendEmployeePasswordResetEmail } from "./mailer-service.js";
 
@@ -17,15 +24,12 @@ export async function requestEmployeePasswordReset(
   app: FastifyInstance,
   input: { email: string; webBaseUrl: string }
 ): Promise<{ sent: boolean; reason?: string }> {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
   const trimmed = input.email.trim();
-  const user = await app.prisma.user.findFirst({
-    where: { email: { equals: trimmed, mode: "insensitive" } },
-    select: { id: true, fullName: true, passwordHash: true, email: true }
-  });
+  const user = await findUserByEmailInsensitive(app.db, trimmed);
 
   if (!user?.passwordHash) {
     return { sent: true };
@@ -35,18 +39,7 @@ export async function requestEmployeePasswordReset(
   const tokenHash = hashPasswordResetToken(rawToken);
   const expiresAt = new Date(Date.now() + RESET_TTL_MS);
 
-  await app.prisma.$transaction([
-    app.prisma.employeePasswordReset.deleteMany({
-      where: { userId: user.id, usedAt: null }
-    }),
-    app.prisma.employeePasswordReset.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        expiresAt
-      }
-    })
-  ]);
+  await replacePendingPasswordReset(app.db, user.id, tokenHash, expiresAt);
 
   const resetUrl = `${input.webBaseUrl.replace(/\/$/, "")}/employee/reset-password?token=${encodeURIComponent(rawToken)}`;
 
@@ -58,12 +51,12 @@ export async function requestEmployeePasswordReset(
       resetUrl
     });
   } catch {
-    await app.prisma.employeePasswordReset.deleteMany({ where: { tokenHash } });
+    await deletePasswordResetByTokenHash(app.db, tokenHash);
     return { sent: false, reason: "Email delivery failed." };
   }
 
   if (!emailResult.delivered) {
-    await app.prisma.employeePasswordReset.deleteMany({ where: { tokenHash } });
+    await deletePasswordResetByTokenHash(app.db, tokenHash);
     return { sent: false, reason: emailResult.reason };
   }
 
@@ -74,19 +67,12 @@ export async function completeEmployeePasswordReset(
   app: FastifyInstance,
   input: { token: string; newPassword: string }
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
   const tokenHash = hashPasswordResetToken(input.token.trim());
-  const record = await app.prisma.employeePasswordReset.findFirst({
-    where: {
-      tokenHash,
-      usedAt: null,
-      expiresAt: { gt: new Date() }
-    },
-    select: { id: true, userId: true }
-  });
+  const record = await findValidPasswordReset(app.db, tokenHash);
 
   if (!record) {
     return { ok: false, message: "This reset link is invalid or has expired. Request a new one from the login page." };
@@ -95,16 +81,7 @@ export async function completeEmployeePasswordReset(
   const passwordHash = createPasswordHash(input.newPassword);
   const now = new Date();
 
-  await app.prisma.$transaction([
-    app.prisma.user.update({
-      where: { id: record.userId },
-      data: { passwordHash, passwordSetAt: now }
-    }),
-    app.prisma.employeePasswordReset.updateMany({
-      where: { userId: record.userId, usedAt: null },
-      data: { usedAt: now }
-    })
-  ]);
+  await completePasswordReset(app.db, record.userId, passwordHash, now);
 
   return { ok: true };
 }

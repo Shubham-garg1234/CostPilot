@@ -19,17 +19,16 @@
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "db:migrate": "tsx apps/api/src/db/migrate-cli.ts",
+    "db:seed": "tsx db/seed.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.5",
-    "@prisma/client": "^6.19.3",
-    "prisma": "^6.19.3"
+    "pg": "^8.16.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "@types/pg": "^8.15.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "tsx": "^4.19.3",

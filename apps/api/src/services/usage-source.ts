@@ -1,4 +1,4 @@
-import { IntegrationType, UsageSource } from "@prisma/client";
+import { IntegrationType, UsageSource } from "../db/types.js";
 
 export const usageSourceValues = [
   "sdk",

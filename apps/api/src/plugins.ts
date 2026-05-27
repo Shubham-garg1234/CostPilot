@@ -1,11 +1,12 @@
 import fp from "fastify-plugin";
 import cors from "@fastify/cors";
-import { PrismaClient } from "@prisma/client";
 import { Redis as UpstashRedis } from "@upstash/redis";
 import { Redis as IORedis } from "ioredis";
 import Stripe from "stripe";
 import type { FastifyInstance } from "fastify";
 import { getEnvConfig } from "./config.js";
+import { createDb, type Db } from "./db/client.js";
+import { runMigrations } from "./db/migrate.js";
 import { createClickHouseClient } from "./services/clickhouse-service.js";
 import type { DependencyState, MemoryRedisLike, UpstashRedisLike } from "./types.js";
 
@@ -49,7 +50,7 @@ export async function registerPlugins(app: FastifyInstance) {
 const infraPlugin = fp(async (app) => {
   const env = getEnvConfig();
   const dependencyStates: DependencyState[] = [];
-  const prisma = await buildPrismaClient(app, dependencyStates);
+  const db = await buildPostgresClient(app, dependencyStates);
   const redis = await buildRedisClient(
     app,
     {
@@ -63,7 +64,7 @@ const infraPlugin = fp(async (app) => {
   const clickhouse = await buildClickHouseClient(app, env, dependencyStates);
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
-  app.decorate("prisma", prisma as never);
+  app.decorate("db", db as never);
   app.decorate("redis", redis as never);
   app.decorate("clickhouse", clickhouse as never);
   app.decorate("stripe", stripe);
@@ -78,13 +79,12 @@ const infraPlugin = fp(async (app) => {
 
   app.addHook("onClose", async () => {
     await redis.quit();
-    await prisma?.$disconnect();
+    await db?.end();
   });
 });
 
-async function buildPrismaClient(app: FastifyInstance, states: DependencyState[]) {
+async function buildPostgresClient(app: FastifyInstance, states: DependencyState[]): Promise<Db | null> {
   const env = getEnvConfig();
-  const prisma = new PrismaClient();
   const state: DependencyState = {
     name: "postgres",
     mode: env.POSTGRES_MODE,
@@ -93,27 +93,39 @@ async function buildPrismaClient(app: FastifyInstance, states: DependencyState[]
     target: formatDatabaseTarget(env.DATABASE_URL)
   };
 
+  if (!env.DATABASE_URL) {
+    states.push(state);
+    if (env.POSTGRES_MODE === "required") {
+      throw new Error("DATABASE_URL is required.");
+    }
+    app.log.warn("PostgreSQL unavailable, running with local fallbacks");
+    return null;
+  }
+
+  const db = createDb(env.DATABASE_URL);
+
   try {
-    await prisma.$connect();
+    await db.connect();
+    await runMigrations(db);
     app.log.info("Connected to PostgreSQL");
     state.available = true;
     states.push(state);
-    return prisma;
+    return db;
   } catch (error) {
-    const prismaError = error as { code?: string; message?: string; name?: string; stack?: string };
+    const pgError = error as { code?: string; message?: string; name?: string; stack?: string };
     app.log.error(
       {
-        code: prismaError.code,
-        name: prismaError.name,
-        message: prismaError.message,
-        stack: prismaError.stack,
+        code: pgError.code,
+        name: pgError.name,
+        message: pgError.message,
+        stack: pgError.stack,
         databaseTarget: formatDatabaseTarget(env.DATABASE_URL)
       },
       "PostgreSQL connection failed"
     );
-    state.detail = prismaError.message ?? "Connection failed";
+    state.detail = pgError.message ?? "Connection failed";
     states.push(state);
-    await prisma.$disconnect().catch(() => undefined);
+    await db.end().catch(() => undefined);
     if (env.POSTGRES_MODE === "required") {
       throw error;
     }

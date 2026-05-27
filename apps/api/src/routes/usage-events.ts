@@ -1,5 +1,8 @@
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
+import { listRecentUsageEvents, summarizeUsageGroupBy, summarizeUsageTotals } from "../db/usage.js";
+import { decimalNumber } from "../db/mappers.js";
+import type { UsageSource } from "../db/types.js";
 import { authenticate } from "../auth.js";
 import { calculateCost } from "../services/costing.js";
 import { mirrorUsageEventToAnalytics, persistUsageEvent } from "../services/analytics-service.js";
@@ -39,6 +42,37 @@ const summaryQuerySchema = z.object({
   provider: z.enum(["openai", "anthropic", "gemini"]).optional(),
   days: z.coerce.number().int().min(1).max(90).default(30)
 });
+
+function buildUsageWhere(orgId: string, options: {
+  since: Date;
+  userId?: string;
+  source?: string;
+  category?: string;
+  provider?: string;
+}) {
+  const clauses = [`"orgId" = $1`, `"createdAt" >= $2`];
+  const params: unknown[] = [orgId, options.since];
+  let index = 3;
+
+  if (options.userId) {
+    clauses.push(`"userId" = $${index++}`);
+    params.push(options.userId);
+  }
+  if (options.source) {
+    clauses.push(`source = $${index++}`);
+    params.push(options.source);
+  }
+  if (options.category) {
+    clauses.push(`category = $${index++}`);
+    params.push(options.category);
+  }
+  if (options.provider) {
+    clauses.push(`provider = $${index++}`);
+    params.push(options.provider);
+  }
+
+  return { sql: clauses.join(" AND "), params };
+}
 
 export async function registerUsageEventRoutes(app: FastifyInstance) {
   app.post("/api/usage-events", { preHandler: [authenticate] }, async (request, reply) => {
@@ -97,95 +131,64 @@ export async function registerUsageEventRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/usage-events/summary", { preHandler: [authenticate] }, async (request, reply) => {
-    if (!app.prisma) {
+    if (!app.db) {
       return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
     const query = summaryQuerySchema.parse(request.query);
     const since = new Date(Date.now() - query.days * 24 * 60 * 60 * 1000);
-    const where = {
-      orgId: request.auth.orgId,
-      createdAt: { gte: since },
-      ...(request.auth.authMode === "employee" ? { userId: request.auth.userId } : {}),
-      ...(query.source ? { source: normalizeUsageSource(query.source) } : {}),
-      ...(query.category ? { category: query.category } : {}),
-      ...(query.provider ? { provider: query.provider } : {})
-    };
+    const { sql, params } = buildUsageWhere(request.auth.orgId, {
+      since,
+      userId: request.auth.authMode === "employee" ? request.auth.userId : undefined,
+      source: query.source ? normalizeUsageSource(query.source) : undefined,
+      category: query.category,
+      provider: query.provider
+    });
 
     const [totals, bySource, byCategory, byProvider] = await Promise.all([
-      app.prisma.usageEvent.aggregate({
-        where,
-        _sum: { totalTokens: true, costUsd: true },
-        _count: { _all: true }
-      }),
-      app.prisma.usageEvent.groupBy({
-        by: ["source"],
-        where,
-        _sum: { totalTokens: true, costUsd: true },
-        _count: { _all: true },
-        orderBy: { _sum: { costUsd: "desc" } }
-      }),
-      app.prisma.usageEvent.groupBy({
-        by: ["category"],
-        where,
-        _sum: { totalTokens: true, costUsd: true },
-        _count: { _all: true },
-        orderBy: { _sum: { costUsd: "desc" } }
-      }),
-      app.prisma.usageEvent.groupBy({
-        by: ["provider"],
-        where,
-        _sum: { totalTokens: true, costUsd: true },
-        _count: { _all: true },
-        orderBy: { _sum: { costUsd: "desc" } }
-      })
+      summarizeUsageTotals(app.db, sql, params),
+      summarizeUsageGroupBy(app.db, "source", sql, params),
+      summarizeUsageGroupBy(app.db, "category", sql, params),
+      summarizeUsageGroupBy(app.db, "provider", sql, params)
     ]);
 
     return {
       rangeDays: query.days,
-      totals: {
-        totalTokens: totals._sum.totalTokens ?? 0,
-        costUsd: Number(totals._sum.costUsd ?? 0),
-        requestCount: totals._count._all
-      },
+      totals,
       bySource: bySource.map((row) => ({
-        source: serializeUsageSource(row.source),
-        totalTokens: row._sum.totalTokens ?? 0,
-        costUsd: Number(row._sum.costUsd ?? 0),
-        requestCount: row._count._all
+        source: serializeUsageSource(row.key as UsageSource),
+        totalTokens: row.totalTokens,
+        costUsd: row.costUsd,
+        requestCount: row.requestCount
       })),
       byCategory: byCategory.map((row) => ({
-        category: row.category,
-        totalTokens: row._sum.totalTokens ?? 0,
-        costUsd: Number(row._sum.costUsd ?? 0),
-        requestCount: row._count._all
+        category: row.key,
+        totalTokens: row.totalTokens,
+        costUsd: row.costUsd,
+        requestCount: row.requestCount
       })),
       byProvider: byProvider.map((row) => ({
-        provider: row.provider,
-        totalTokens: row._sum.totalTokens ?? 0,
-        costUsd: Number(row._sum.costUsd ?? 0),
-        requestCount: row._count._all
+        provider: row.key,
+        totalTokens: row.totalTokens,
+        costUsd: row.costUsd,
+        requestCount: row.requestCount
       }))
     };
   });
 
   app.get("/api/usage-events/recent", { preHandler: [authenticate] }, async (request, reply) => {
-    if (!app.prisma) {
+    if (!app.db) {
       return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
-    const events = await app.prisma.usageEvent.findMany({
-      where: { orgId: request.auth.orgId },
-      take: 20,
-      orderBy: { createdAt: "desc" }
-    });
+    const events = await listRecentUsageEvents(app.db, request.auth.orgId, 20);
 
     return {
       events: events.map((event) => ({
         ...event,
         source: serializeUsageSource(event.source),
         integrationType: serializeIntegrationType(event.integrationType),
-        costUsd: Number(event.costUsd)
+        costUsd: decimalNumber(event.costUsd)
       }))
     };
   });

@@ -1,7 +1,16 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { RoleKey } from "@prisma/client";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { getEnvConfig } from "./config.js";
+import type { Db } from "./db/client.js";
+import {
+  countOrganizations,
+  countUsers,
+  createOrganization,
+  createUser,
+  findOrganizationBySlug,
+  findUserForClerkIdentity
+} from "./db/index.js";
+import { RoleKey } from "./db/types.js";
 import { verifyEmployeeAccessToken } from "./services/employee-auth-service.js";
 import type { AuthContext } from "./types.js";
 
@@ -35,7 +44,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     return reply.status(401).send({ message: "Invalid Clerk session token." });
   }
 
-  if (!request.server.prisma) {
+  if (!request.server.db) {
     return reply.status(503).send({ message: "PostgreSQL is unavailable." });
   }
 
@@ -48,7 +57,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       clerkUserId: identity.clerkUserId,
       primaryEmail: identity.primaryEmail,
       fullName: identity.fullName,
-      prisma: request.server.prisma
+      db: request.server.db
     });
   }
 
@@ -95,7 +104,7 @@ export async function authenticateOrganizationSetup(request: FastifyRequest, rep
     return reply.status(401).send({ message: "Invalid Clerk session token." });
   }
 
-  if (!request.server.prisma) {
+  if (!request.server.db) {
     return reply.status(503).send({ message: "PostgreSQL is unavailable." });
   }
 
@@ -155,7 +164,6 @@ function normalizeClerkJwtKey(value?: string) {
     return undefined;
   }
 
-  // Ignore placeholder values so local/dev auth can still verify via Clerk.
   if (trimmed.includes("this-is-meant-to-be-secret") || trimmed.endsWith("_xxx") || trimmed === "placeholder") {
     return undefined;
   }
@@ -183,17 +191,13 @@ async function findDbUserForClerkIdentity(
   request: FastifyRequest,
   identity: Awaited<ReturnType<typeof getClerkIdentity>>
 ) {
-  return await request.server.prisma?.user.findFirst({
-    where: {
-      OR: [
-        { clerkUserId: identity.clerkUserId },
-        ...(identity.primaryEmail ? [{ email: identity.primaryEmail }] : [])
-      ]
-    },
-    include: {
-      team: true,
-      organization: true
-    }
+  if (!request.server.db) {
+    return null;
+  }
+
+  return findUserForClerkIdentity(request.server.db, {
+    clerkUserId: identity.clerkUserId,
+    primaryEmail: identity.primaryEmail
   }).catch(() => null);
 }
 
@@ -216,10 +220,10 @@ async function bootstrapInitialUser(input: {
   clerkUserId: string;
   primaryEmail?: string;
   fullName?: string;
-  prisma: NonNullable<FastifyRequest["server"]["prisma"]>;
+  db: Db;
 }) {
-  const orgCount = await input.prisma.organization.count().catch(() => 0);
-  const userCount = await input.prisma.user.count().catch(() => 0);
+  const orgCount = await countOrganizations(input.db).catch(() => 0);
+  const userCount = await countUsers(input.db).catch(() => 0);
 
   if (orgCount > 0 || userCount > 0 || !input.primaryEmail) {
     return null;
@@ -227,38 +231,27 @@ async function bootstrapInitialUser(input: {
 
   const orgName = input.fullName?.trim() ? `${input.fullName.trim()}'s Workspace` : "CostPilot Workspace";
   const orgSlugBase = slugify(orgName);
-  const slug = await uniqueOrganizationSlug(input.prisma, orgSlugBase);
+  const slug = await uniqueOrganizationSlug(input.db, orgSlugBase);
 
-  const organization = await input.prisma.organization.create({
-    data: {
-      name: orgName,
-      slug
-    }
+  const organization = await createOrganization(input.db, {
+    name: orgName,
+    slug
   });
 
-  return input.prisma.user.create({
-    data: {
-      clerkUserId: input.clerkUserId,
-      email: input.primaryEmail,
-      fullName: input.fullName?.trim() || input.primaryEmail,
-      organizationId: organization.id,
-      role: RoleKey.ADMIN
-    },
-    include: {
-      team: true,
-      organization: true
-    }
+  return createUser(input.db, {
+    clerkUserId: input.clerkUserId,
+    email: input.primaryEmail,
+    fullName: input.fullName?.trim() || input.primaryEmail,
+    organizationId: organization.id,
+    role: RoleKey.ADMIN
   });
 }
 
-async function uniqueOrganizationSlug(
-  prisma: NonNullable<FastifyRequest["server"]["prisma"]>,
-  base: string
-) {
+async function uniqueOrganizationSlug(db: Db, base: string) {
   let attempt = base || "costpilot-workspace";
   let suffix = 1;
 
-  while (await prisma.organization.findUnique({ where: { slug: attempt } })) {
+  while (await findOrganizationBySlug(db, attempt)) {
     suffix += 1;
     attempt = `${base}-${suffix}`;
   }

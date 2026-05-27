@@ -1,11 +1,12 @@
-import { Prisma, RoleKey } from "@prisma/client";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { authenticate, authenticateOrganizationSetup } from "../auth.js";
+import { isUniqueViolation } from "../db/index.js";
+import { RoleKey, roleKeyValues } from "../db/types.js";
 import {
   OrganizationConflictError,
   OrganizationNotFoundError,
-  createOrganizationWithAdminUser,
+  createOrganizationWithAdminUserRecord,
   createOrganizationRecord,
   createTeamRecord,
   createUserRecord,
@@ -25,14 +26,14 @@ const teamSchema = z.object({
 const userSchema = z.object({
   email: z.string().email(),
   fullName: z.string().min(2),
-  role: z.nativeEnum(RoleKey),
+  role: z.enum(roleKeyValues),
   teamId: z.string().optional(),
   clerkUserId: z.string().optional()
 });
 
 export async function registerOrganizationRoutes(app: FastifyInstance) {
   app.get("/api/organizations/current", { preHandler: [authenticate] }, async (request, reply) => {
-    if (!app.prisma) {
+    if (!app.db) {
       return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
@@ -62,7 +63,7 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
             currentOrgId: request.auth.orgId,
             actorUserId: request.auth.userId
           })
-        : await createOrganizationWithAdminUser(app, {
+        : await createOrganizationWithAdminUserRecord(app, {
             name: body.name,
             slug: body.slug,
             clerkUserId: request.organizationSetupAuth!.clerkUserId,
@@ -75,7 +76,7 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
       if (error instanceof OrganizationConflictError) {
         return reply.status(409).send({ message: error.message });
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (isUniqueViolation(error)) {
         return reply.status(409).send({ message: "That organization slug is already in use." });
       }
 
@@ -99,7 +100,7 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
         })
       );
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (isUniqueViolation(error)) {
         return reply.status(409).send({ message: "A team with that name already exists in this organization." });
       }
 
@@ -126,7 +127,7 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
         })
       );
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (isUniqueViolation(error)) {
         return reply.status(409).send({ message: "A user with that email or Clerk account already exists." });
       }
 

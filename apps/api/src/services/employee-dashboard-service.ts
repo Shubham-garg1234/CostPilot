@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import { aggregateUsageForUser, findUserWithOrganization, listRecentUsageForUser } from "../db/index.js";
+import { decimalNumber } from "../db/mappers.js";
 
 export async function getEmployeeDashboard(app: FastifyInstance, input: {
   orgId: string;
@@ -6,30 +8,21 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
   email?: string;
   apiBaseUrl: string;
 }) {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
-  const [totals, recentEvents, user] = await Promise.all([
-    app.prisma.usageEvent.aggregate({
-      where: { orgId: input.orgId, userId: input.userId },
-      _sum: { totalTokens: true, costUsd: true },
-      _count: { _all: true }
-    }),
-    app.prisma.usageEvent.findMany({
-      where: { orgId: input.orgId, userId: input.userId },
-      orderBy: { createdAt: "desc" },
-      take: 10
-    }),
-    app.prisma.user.findUnique({
-      where: { id: input.userId },
-      include: { organization: true }
-    })
+  const [totals, recentEvents, userWithOrg] = await Promise.all([
+    aggregateUsageForUser(app.db, input.orgId, input.userId),
+    listRecentUsageForUser(app.db, input.orgId, input.userId, 10),
+    findUserWithOrganization(app.db, input.userId)
   ]);
 
-  if (!user) {
+  if (!userWithOrg) {
     throw new Error("User not found.");
   }
+
+  const { user, organization } = userWithOrg;
 
   const cursorConfig = {
     mcpServers: {
@@ -52,13 +45,13 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
       fullName: user.fullName,
       email: user.email,
       organizationId: user.organizationId,
-      organizationName: user.organization.name,
+      organizationName: organization.name,
       role: user.role
     },
     usage: {
-      totalRequests: totals._count._all,
-      totalTokens: totals._sum.totalTokens ?? 0,
-      totalCostUsd: roundCostUsd(totals._sum.costUsd ?? 0)
+      totalRequests: totals.requestCount,
+      totalTokens: totals.totalTokens,
+      totalCostUsd: roundCostUsd(totals.costUsd)
     },
     recentEvents: recentEvents.map((event) => ({
       id: event.id,
@@ -74,21 +67,6 @@ export async function getEmployeeDashboard(app: FastifyInstance, input: {
   };
 }
 
-function roundCostUsd(value: number | { toNumber?: () => number } | null | undefined) {
-  const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  return Number(numeric.toFixed(6));
-}
-
-function getCursorApiUrl(apiBaseUrl: string) {
-  const trimmed = apiBaseUrl.trim();
-
-  if (!trimmed) {
-    return "http://localhost:4000/";
-  }
-
-  if (trimmed.startsWith("http://127.0.0.1:4000")) {
-    return "http://localhost:4000/";
-  }
-
-  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+function roundCostUsd(value: number | string | null | undefined) {
+  return Number(decimalNumber(value).toFixed(6));
 }

@@ -1,7 +1,9 @@
-import { RoleKey } from "@prisma/client";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { z } from "zod";
 import { authenticate } from "../auth.js";
 import { getEnvConfig } from "../config.js";
+import { RoleKey, roleKeyValues } from "../db/types.js";
+import { findUserByEmail, findUserWithOrganization } from "../db/index.js";
 import { createEmployeeAccessToken, verifyPassword } from "../services/employee-auth-service.js";
 import {
   completeEmployeePasswordReset,
@@ -9,7 +11,6 @@ import {
 } from "../services/employee-password-reset-service.js";
 import { getEmployeeDashboard } from "../services/employee-dashboard-service.js";
 import { getOrganizationSnapshot } from "../services/organization-service.js";
-import { z } from "zod";
 
 const employeeLoginSchema = z.object({
   email: z.string().email(),
@@ -27,27 +28,20 @@ const employeeResetPasswordSchema = z.object({
 
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.post("/api/auth/employee-login", async (request, reply) => {
-    if (!app.prisma) {
+    if (!app.db) {
       return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
     const body = employeeLoginSchema.parse(request.body);
     const env = getEnvConfig();
-    const user = await app.prisma.user.findUnique({
-      where: {
-        email: body.email
-      },
-      include: {
-        organization: {
-          select: {
-            name: true,
-            slug: true
-          }
-        }
-      }
-    });
+    const user = await findUserByEmail(app.db, body.email);
 
     if (!user || !verifyPassword(body.password, user.passwordHash)) {
+      return reply.status(401).send({ message: "Invalid email or password." });
+    }
+
+    const profile = await findUserWithOrganization(app.db, user.id);
+    if (!profile) {
       return reply.status(401).send({ message: "Invalid email or password." });
     }
 
@@ -70,15 +64,15 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         fullName: user.fullName,
         email: user.email,
         orgId: user.organizationId,
-        organizationName: user.organization.name,
-        organizationSlug: user.organization.slug,
+        organizationName: profile.organization.name,
+        organizationSlug: profile.organization.slug,
         role: user.role
       }
     };
   });
 
   app.post("/api/auth/employee-forgot-password", async (request, reply) => {
-    if (!app.prisma) {
+    if (!app.db) {
       return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
@@ -112,7 +106,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/auth/employee-reset-password", async (request, reply) => {
-    if (!app.prisma) {
+    if (!app.db) {
       return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
@@ -134,7 +128,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get("/api/auth/session", { preHandler: [authenticate] }, async (request, reply) => {
     const env = getEnvConfig();
-    if (!app.prisma) {
+    if (!app.db) {
       return reply.status(503).send({ message: "PostgreSQL is unavailable." });
     }
 
@@ -144,7 +138,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       authMode: request.auth.authMode,
       clerkEnabled: env.AUTH_MODE === "clerk",
       user: request.auth,
-      availableRoles: Object.values(RoleKey),
+      availableRoles: roleKeyValues,
       availableTeams: snapshot.teams
     };
   });
@@ -186,10 +180,7 @@ function resolveEmployeeWebBaseUrl(request: FastifyRequest, env: ReturnType<type
   return null;
 }
 
-function resolvePublicApiBaseUrl(
-  request: FastifyRequest,
-  env: ReturnType<typeof getEnvConfig>
-) {
+function resolvePublicApiBaseUrl(request: FastifyRequest, env: ReturnType<typeof getEnvConfig>) {
   if (env.COSTPILOT_API_URL) {
     return env.COSTPILOT_API_URL;
   }

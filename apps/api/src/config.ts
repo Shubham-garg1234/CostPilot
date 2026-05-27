@@ -159,12 +159,6 @@ export const parsedEnvSchema = envSchema.superRefine((env, ctx) => {
     });
   }
 
-  if (!env.DIRECT_URL) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "DIRECT_URL is required in production so Prisma migrations can use a direct Postgres connection."
-    });
-  }
 
 });
 

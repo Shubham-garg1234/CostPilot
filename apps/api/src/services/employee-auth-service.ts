@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import type { RoleKey } from "@prisma/client";
+import type { RoleKey } from "../db/types.js";
 
 const TOKEN_PREFIX = "cp_emp";
 

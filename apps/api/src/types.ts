@@ -1,6 +1,7 @@
 import type Redis from "ioredis";
 import type Stripe from "stripe";
-import type { IntegrationType, PrismaClient, RoleKey, UsageSource } from "@prisma/client";
+import type { Db } from "./db/client.js";
+import type { IntegrationType, RoleKey, UsageSource } from "./db/types.js";
 
 export type AuthContext = {
   userId: string;
@@ -125,7 +126,7 @@ export type UpstashRedisLike = {
 
 declare module "fastify" {
   interface FastifyInstance {
-    prisma: PrismaClient | null;
+    db: Db | null;
     redis: Redis | MemoryRedisLike | UpstashRedisLike;
     clickhouse: ClickHouseClientLike | null;
     stripe: Stripe;

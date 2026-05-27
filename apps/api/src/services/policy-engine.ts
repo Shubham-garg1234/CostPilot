@@ -1,10 +1,11 @@
-import { Prisma, ViolationAction, ViolationType, type Policy } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
+import { createViolation as createViolationRow, findActivePoliciesForEvaluation } from "../db/index.js";
+import { ViolationAction, ViolationType, type PolicyRow } from "../db/types.js";
 import type { AuthContext, LlmProxyRequest, PolicyDecision } from "../types.js";
 import { getUsageSnapshot, registerViolation } from "./usage-counter-service.js";
 
 type PolicyLike = Pick<
-  Policy,
+  PolicyRow,
   | "orgId"
   | "role"
   | "category"
@@ -29,18 +30,14 @@ function matchesPolicy(policy: PolicyLike, request: LlmProxyRequest, auth: AuthC
 }
 
 export async function resolvePolicy(app: FastifyInstance, auth: AuthContext, request: LlmProxyRequest) {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
-  const policies = await app.prisma.policy.findMany({
-    where: {
-      orgId: auth.orgId,
-      role: auth.role,
-      category: request.category,
-      disabled: false
-    },
-    orderBy: { createdAt: "desc" }
+  const policies = await findActivePoliciesForEvaluation(app.db, {
+    orgId: auth.orgId,
+    role: auth.role,
+    category: request.category
   }).catch(() => []);
 
   return policies.find((policy) => matchesPolicy(policy, request, auth)) ?? null;
@@ -119,24 +116,22 @@ async function createViolation(
   message: string,
   cooldownMinutes: number
 ) {
-  if (!app.prisma) {
+  if (!app.db) {
     await registerViolation(app, auth, request.category, request.feature, cooldownMinutes);
     return;
   }
 
-  await app.prisma.violation.create({
-    data: {
-      orgId: auth.orgId,
-      userId: auth.userId,
-      role: auth.role,
-      category: request.category,
-      feature: request.feature,
-      model: request.model,
-      type,
-      actionTaken,
-      message,
-      metadata: request.metadata as Prisma.InputJsonValue | undefined
-    }
+  await createViolationRow(app.db, {
+    orgId: auth.orgId,
+    userId: auth.userId,
+    role: auth.role,
+    category: request.category,
+    feature: request.feature,
+    model: request.model,
+    type,
+    actionTaken,
+    message,
+    metadata: request.metadata
   }).catch(() => null);
 
   await registerViolation(app, auth, request.category, request.feature, cooldownMinutes);

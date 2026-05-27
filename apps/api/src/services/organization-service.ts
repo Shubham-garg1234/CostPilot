@@ -1,4 +1,15 @@
-import { RoleKey, ViolationAction } from "@prisma/client";
+import { RoleKey, type ViolationAction } from "../db/types.js";
+import {
+  createOrganization,
+  createOrganizationWithAdminUser as createOrganizationWithAdminUserRow,
+  findOrganizationById,
+  getOrganizationEmptyCheck,
+  getOrganizationSnapshotRows,
+  updateOrganization
+} from "../db/organizations.js";
+import { createTeam } from "../db/teams.js";
+import { createUser } from "../db/users.js";
+import { mapPolicy, mapUser } from "../db/mappers.js";
 import type { FastifyInstance } from "fastify";
 import { createPasswordHash, generateTemporaryPassword } from "./employee-auth-service.js";
 import { sendEmployeeCredentialsEmail } from "./mailer-service.js";
@@ -39,60 +50,53 @@ export type OrganizationSnapshot = {
 };
 
 export async function getOrganizationSnapshot(app: FastifyInstance, orgId: string): Promise<OrganizationSnapshot> {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
-  const organization = await app.prisma.organization.findUnique({
-    where: { id: orgId },
-    include: {
-      teams: {
-        include: {
-          _count: {
-            select: { users: true }
-          }
-        }
-      },
-      users: true,
-      policies: true
-    }
-  });
+  const snapshot = await getOrganizationSnapshotRows(app.db, orgId);
 
-  if (!organization) {
+  if (!snapshot.organization) {
     throw new OrganizationNotFoundError("Organization not found.");
   }
 
   return {
     organization: {
-      id: organization.id,
-      name: organization.name,
-      slug: organization.slug,
-      createdAt: organization.createdAt.toISOString()
+      id: snapshot.organization.id,
+      name: snapshot.organization.name,
+      slug: snapshot.organization.slug,
+      createdAt: snapshot.organization.createdAt.toISOString()
     },
-    teams: organization.teams.map((team) => ({
-      id: team.id,
-      name: team.name,
-      departmentCode: team.departmentCode,
-      userCount: team._count.users
+    teams: snapshot.teams.map((team) => ({
+      id: String(team.id),
+      name: String(team.name),
+      departmentCode: team.departmentCode ? String(team.departmentCode) : null,
+      userCount: Number(team.userCount ?? 0)
     })),
-    users: organization.users.map((user) => ({
-      id: user.id,
-      email: user.email,
-      name: user.fullName,
-      role: user.role,
-      teamId: user.teamId,
-      hasPassword: Boolean(user.passwordHash)
-    })),
-    policies: organization.policies.map((policy) => ({
-      id: policy.id,
-      role: policy.role,
-      category: policy.category,
-      feature: policy.feature,
-      actionOnViolation: policy.actionOnViolation,
-      allowedModels: policy.allowedModels,
-      maxTokensPerDay: policy.maxTokensPerDay,
-      maxRequestsPerHour: policy.maxRequestsPerHour
-    }))
+    users: snapshot.users.map((user) => {
+      const mapped = mapUser(user);
+      return {
+        id: mapped.id,
+        email: mapped.email,
+        name: mapped.fullName,
+        role: mapped.role,
+        teamId: mapped.teamId,
+        hasPassword: Boolean(mapped.passwordHash)
+      };
+    }),
+    policies: snapshot.policies.map((policy) => {
+      const mapped = mapPolicy(policy);
+      return {
+        id: mapped.id,
+        role: mapped.role,
+        category: mapped.category,
+        feature: mapped.feature,
+        actionOnViolation: mapped.actionOnViolation,
+        allowedModels: mapped.allowedModels,
+        maxTokensPerDay: mapped.maxTokensPerDay,
+        maxRequestsPerHour: mapped.maxRequestsPerHour
+      };
+    })
   };
 }
 
@@ -100,39 +104,15 @@ export async function createOrganizationRecord(
   app: FastifyInstance,
   input: { name: string; slug: string; currentOrgId: string; actorUserId: string }
 ) {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
-  const currentOrganization = await app.prisma.organization.findUnique({
-    where: { id: input.currentOrgId },
-    include: {
-      users: {
-        select: {
-          id: true
-        }
-      },
-      _count: {
-        select: {
-          teams: true,
-          policies: true,
-          usageEvents: true,
-          billingRecords: true,
-          violations: true
-        }
-      }
-    }
-  });
-
+  const currentOrganization = await getOrganizationEmptyCheck(app.db, input.currentOrgId);
   let organization;
 
   if (!currentOrganization) {
-    organization = await app.prisma.organization.create({
-      data: {
-        name: input.name,
-        slug: input.slug
-      }
-    });
+    organization = await createOrganization(app.db, { name: input.name, slug: input.slug });
 
     return {
       id: organization.id,
@@ -146,11 +126,11 @@ export async function createOrganizationRecord(
   const onlyActorBelongsToCurrentOrganization =
     currentOrganization.users.length === 1 && currentOrganization.users[0]?.id === input.actorUserId;
   const currentOrganizationIsEmpty =
-    currentOrganization._count.teams === 0 &&
-    currentOrganization._count.policies === 0 &&
-    currentOrganization._count.usageEvents === 0 &&
-    currentOrganization._count.billingRecords === 0 &&
-    currentOrganization._count.violations === 0;
+    currentOrganization.counts.teams === 0 &&
+    currentOrganization.counts.policies === 0 &&
+    currentOrganization.counts.usageEvents === 0 &&
+    currentOrganization.counts.billingRecords === 0 &&
+    currentOrganization.counts.violations === 0;
 
   if (!onlyActorBelongsToCurrentOrganization || !currentOrganizationIsEmpty) {
     throw new OrganizationConflictError(
@@ -158,13 +138,7 @@ export async function createOrganizationRecord(
     );
   }
 
-  organization = await app.prisma.organization.update({
-    where: { id: currentOrganization.id },
-    data: {
-      name: input.name,
-      slug: input.slug
-    }
-  });
+  organization = await updateOrganization(app.db, input.currentOrgId, { name: input.name, slug: input.slug });
 
   return {
     id: organization.id,
@@ -175,28 +149,15 @@ export async function createOrganizationRecord(
   };
 }
 
-export async function createOrganizationWithAdminUser(
+export async function createOrganizationWithAdminUserRecord(
   app: FastifyInstance,
   input: { name: string; slug: string; clerkUserId: string; email: string; fullName: string }
 ) {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
-  const organization = await app.prisma.organization.create({
-    data: {
-      name: input.name,
-      slug: input.slug,
-      users: {
-        create: {
-          clerkUserId: input.clerkUserId,
-          email: input.email,
-          fullName: input.fullName,
-          role: RoleKey.ADMIN
-        }
-      }
-    }
-  });
+  const organization = await createOrganizationWithAdminUserRow(app.db, input);
 
   return {
     id: organization.id,
@@ -211,17 +172,11 @@ export async function createTeamRecord(
   app: FastifyInstance,
   input: { organizationId: string; name: string; departmentCode?: string }
 ) {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
-  const team = await app.prisma.team.create({
-    data: {
-      organizationId: input.organizationId,
-      name: input.name,
-      departmentCode: input.departmentCode
-    }
-  });
+  const team = await createTeam(app.db, input);
 
   return {
     id: team.id,
@@ -243,30 +198,20 @@ export async function createUserRecord(
     clerkUserId?: string;
   }
 ) {
-  if (!app.prisma) {
+  if (!app.db) {
     throw new Error("PostgreSQL is unavailable.");
   }
 
   if (input.teamId) {
-    const team = await app.prisma.team.findFirst({
-      where: {
-        id: input.teamId,
-        organizationId: input.organizationId
-      },
-      select: {
-        id: true
-      }
-    });
+    const { findTeamInOrganization } = await import("../db/teams.js");
+    const team = await findTeamInOrganization(app.db, input.teamId, input.organizationId);
 
     if (!team) {
       throw new Error("Selected team does not belong to the current organization.");
     }
   }
 
-  const organization = await app.prisma.organization.findUnique({
-    where: { id: input.organizationId },
-    select: { id: true, name: true }
-  });
+  const organization = await findOrganizationById(app.db, input.organizationId);
 
   if (!organization) {
     throw new Error("Organization not found.");
@@ -274,17 +219,15 @@ export async function createUserRecord(
 
   const temporaryPassword = generateTemporaryPassword();
 
-  const user = await app.prisma.user.create({
-    data: {
-      organizationId: input.organizationId,
-      email: input.email,
-      fullName: input.fullName,
-      role: input.role,
-      teamId: input.teamId,
-      clerkUserId: input.clerkUserId ?? null,
-      passwordHash: createPasswordHash(temporaryPassword),
-      passwordSetAt: new Date()
-    }
+  const user = await createUser(app.db, {
+    organizationId: input.organizationId,
+    email: input.email,
+    fullName: input.fullName,
+    role: input.role,
+    teamId: input.teamId,
+    clerkUserId: input.clerkUserId ?? null,
+    passwordHash: createPasswordHash(temporaryPassword),
+    passwordSetAt: new Date()
   });
 
   const emailResult = await sendEmployeeCredentialsEmail({
