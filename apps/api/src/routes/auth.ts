@@ -93,6 +93,16 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       });
 
       if (!result.sent) {
+        request.log.warn(
+          {
+            forgotPasswordOutcome: "email_not_sent",
+            reason: result.reason,
+            smtpConfigured: Boolean(
+              env.SMTP_HOST && env.SMTP_PORT && env.SMTP_USER && env.SMTP_PASS && env.EMAIL_FROM
+            )
+          },
+          "employee-forgot-password: mail was not delivered"
+        );
         return reply.status(503).send({
           message:
             result.reason === "SMTP is not configured."

@@ -1,6 +1,14 @@
 import { getEnvConfig } from "../config.js";
 import { createSmtpTransporter, isSmtpConfigured, sendMailWithTimeout } from "./mailer-transport.js";
 
+function smtpFailureReason(error: unknown): "SMTP send timed out" | "Email delivery failed." {
+  const message = error instanceof Error ? error.message : "";
+  if (/timed out/i.test(message)) {
+    return "SMTP send timed out";
+  }
+  return "Email delivery failed.";
+}
+
 export async function sendEmployeeCredentialsEmail(input: {
   to: string;
   fullName: string;
@@ -36,8 +44,8 @@ export async function sendEmployeeCredentialsEmail(input: {
       },
       env.SMTP_TIMEOUT_MS
     );
-  } catch {
-    return { delivered: false, reason: "Email delivery failed." };
+  } catch (error) {
+    return { delivered: false, reason: smtpFailureReason(error) };
   } finally {
     transporter.close();
   }
@@ -72,8 +80,8 @@ export async function sendEmployeePasswordResetEmail(input: { to: string; fullNa
       },
       env.SMTP_TIMEOUT_MS
     );
-  } catch {
-    return { delivered: false as const, reason: "Email delivery failed." };
+  } catch (error) {
+    return { delivered: false as const, reason: smtpFailureReason(error) };
   } finally {
     transporter.close();
   }
