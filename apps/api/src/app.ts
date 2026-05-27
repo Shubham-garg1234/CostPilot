@@ -10,6 +10,7 @@ import { registerOrganizationRoutes } from "./routes/organizations.js";
 import { registerUsageEventRoutes } from "./routes/usage-events.js";
 import { getEnvConfig } from "./config.js";
 import { readMcpHeartbeat } from "./services/mcp-status-service.js";
+import { buildHealthPayload } from "./services/health-service.js";
 
 export async function buildApp() {
   const env = getEnvConfig();
@@ -27,12 +28,15 @@ export async function buildApp() {
 
   await registerPlugins(app);
 
-  app.get("/health", async () => ({
-    status: "ok",
-    service: "costpilot-api",
-    environment: env.NODE_ENV,
-    authMode: env.AUTH_MODE
-  }));
+  app.get("/health", async () =>
+    buildHealthPayload({
+      service: "costpilot-api",
+      environment: env.NODE_ENV,
+      authMode: env.AUTH_MODE,
+      dependencyStates: app.dependencyStates,
+      readyForTraffic: app.isReadyForTraffic()
+    })
+  );
 
   app.get("/ready", async (_, reply) => {
     const ready = app.isReadyForTraffic();

@@ -100,6 +100,8 @@ export type DependencyState = {
   available: boolean;
   target: string;
   detail?: string;
+  /** Set when the app uses a local substitute (e.g. in-memory Redis). */
+  fallback?: string;
 };
 
 export type AnalyticsWriteResult = {

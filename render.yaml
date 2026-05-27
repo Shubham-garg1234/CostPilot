@@ -13,9 +13,9 @@ services:
       - key: POSTGRES_MODE
         value: required
       - key: REDIS_MODE
-        value: required
+        value: optional
       - key: CLICKHOUSE_MODE
-        value: required
+        value: optional
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

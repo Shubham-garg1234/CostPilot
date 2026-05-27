@@ -171,6 +171,7 @@ async function buildRedisClient(
       if (mode === "required") {
         throw error;
       }
+      state.fallback = "in-memory";
       return createMemoryRedis();
     }
   }
@@ -199,6 +200,7 @@ async function buildRedisClient(
       throw error;
     }
 
+    state.fallback = "in-memory";
     return createMemoryRedis();
   }
 }
