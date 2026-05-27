@@ -3,7 +3,7 @@ import { z } from "zod";
 import { authenticate } from "../auth.js";
 import { getEnvConfig } from "../config.js";
 import { RoleKey, roleKeyValues } from "../db/types.js";
-import { findUserByEmail, findUserWithOrganization } from "../db/index.js";
+import { findUserByEmailInsensitive, findUserWithOrganization } from "../db/index.js";
 import { createEmployeeAccessToken, verifyPassword } from "../services/employee-auth-service.js";
 import {
   completeEmployeePasswordReset,
@@ -13,16 +13,16 @@ import { getEmployeeDashboard } from "../services/employee-dashboard-service.js"
 import { getOrganizationSnapshot } from "../services/organization-service.js";
 
 const employeeLoginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email(),
   password: z.string().min(6)
 });
 
 const employeeForgotPasswordSchema = z.object({
-  email: z.string().email()
+  email: z.string().trim().email()
 });
 
 const employeeResetPasswordSchema = z.object({
-  token: z.string().min(32),
+  token: z.string().trim().min(32),
   password: z.string().min(8).max(128)
 });
 
@@ -34,7 +34,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
     const body = employeeLoginSchema.parse(request.body);
     const env = getEnvConfig();
-    const user = await findUserByEmail(app.db, body.email);
+    const user = await findUserByEmailInsensitive(app.db, body.email);
 
     if (!user || !verifyPassword(body.password, user.passwordHash)) {
       return reply.status(401).send({ message: "Invalid email or password." });
@@ -172,6 +172,15 @@ function resolveEmployeeWebBaseUrl(request: FastifyRequest, env: ReturnType<type
   if (origin && /^https?:\/\//i.test(origin)) {
     try {
       return new URL(origin).origin.replace(/\/$/, "");
+    } catch {
+      // fall through to Referer
+    }
+  }
+
+  const referer = request.headers.referer;
+  if (referer && /^https?:\/\//i.test(referer)) {
+    try {
+      return new URL(referer).origin.replace(/\/$/, "");
     } catch {
       return null;
     }

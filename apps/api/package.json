@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "db:migrate": "tsx src/db/migrate-cli.ts",
     "dev": "tsx watch src/index.ts",
     "dev:mcp": "tsx src/mcp/index.ts",
     "start": "node dist/index.js",

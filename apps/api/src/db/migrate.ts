@@ -5,6 +5,13 @@ import type { Db } from "./client.js";
 
 const MIGRATIONS_TABLE = "schema_migrations";
 
+/**
+ * Prisma's `_prisma_migrations` can mark these as finished while the database is missing
+ * the objects (or we ship SQL under the same folder name). Do not copy those names into
+ * `schema_migrations` pre-emptively — let our SQL migration run (it is idempotent).
+ */
+const PRISMA_IMPORT_DENYLIST = new Set<string>(["20260504120000_employee_password_reset"]);
+
 export function getMigrationsDirectory() {
   const currentFile = fileURLToPath(import.meta.url);
   return path.resolve(path.dirname(currentFile), "../../../../db/migrations");
@@ -75,6 +82,9 @@ async function importLegacyPrismaMigrations(db: Db) {
   `);
 
   for (const row of prismaMigrations.rows) {
+    if (PRISMA_IMPORT_DENYLIST.has(row.migration_name)) {
+      continue;
+    }
     await db.query(
       `INSERT INTO "${MIGRATIONS_TABLE}" ("name") VALUES ($1) ON CONFLICT ("name") DO NOTHING`,
       [row.migration_name]

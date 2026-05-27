@@ -1,4 +1,6 @@
--- CreateTable (idempotent — safe if legacy Prisma already created it)
+-- Idempotent guard: fixes DBs where Prisma history marked the reset migration applied
+-- but table never existed (or was dropped). Safe to run on every environment.
+
 CREATE TABLE IF NOT EXISTS "EmployeePasswordReset" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
@@ -10,13 +12,10 @@ CREATE TABLE IF NOT EXISTS "EmployeePasswordReset" (
     CONSTRAINT "EmployeePasswordReset_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "EmployeePasswordReset_tokenHash_key" ON "EmployeePasswordReset"("tokenHash");
 
--- CreateIndex
 CREATE INDEX IF NOT EXISTS "EmployeePasswordReset_userId_idx" ON "EmployeePasswordReset"("userId");
 
--- AddForeignKey
 DO $$
 BEGIN
   ALTER TABLE "EmployeePasswordReset"
