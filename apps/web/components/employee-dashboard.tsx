@@ -640,7 +640,6 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       instructionPath: ".cursor/rules/costpilot-mcp.mdc",
       instructionText: costpilotCursorRulesMdc,
       projectFiles: [
-        { path: "mcp.json", contents: JSON.stringify(fullCursorConfig, null, 2) },
         { path: ".cursor/mcp.json", contents: JSON.stringify(fullCursorConfig, null, 2) },
         { path: ".cursor/rules/costpilot-mcp.mdc", contents: costpilotCursorRulesMdc },
         { path: "rules.md", contents: commonRules }
@@ -664,7 +663,6 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       instructionPath: "CLAUDE.md",
       instructionText: costpilotAgentInstructionsMarkdown,
       projectFiles: [
-        { path: "mcp.json", contents: claudeProjectConfig },
         { path: ".mcp.json", contents: claudeProjectConfig },
         { path: "CLAUDE.md", contents: costpilotAgentInstructionsMarkdown },
         { path: "rules.md", contents: commonRules }
@@ -688,7 +686,6 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       instructionPath: ".github/copilot-instructions.md",
       instructionText: costpilotAgentInstructionsMarkdown,
       projectFiles: [
-        { path: "mcp.json", contents: copilotConfig },
         { path: ".vscode/mcp.json", contents: copilotConfig },
         { path: ".github/copilot-instructions.md", contents: costpilotAgentInstructionsMarkdown },
         { path: "rules.md", contents: commonRules }
@@ -711,7 +708,6 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       instructionPath: "AGENTS.md",
       instructionText: costpilotAgentInstructionsMarkdown,
       projectFiles: [
-        { path: "mcp.json", contents: JSON.stringify(fullCursorConfig, null, 2) },
         { path: ".codex/config.toml", contents: codexConfig },
         { path: "AGENTS.md", contents: costpilotAgentInstructionsMarkdown },
         { path: "rules.md", contents: commonRules }
