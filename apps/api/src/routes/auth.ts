@@ -5,7 +5,7 @@ import { getEnvConfig } from "../config.js";
 import { RoleKey, roleKeyValues } from "../db/types.js";
 import { findUserByEmailInsensitive, findUserWithOrganization } from "../db/index.js";
 import { createEmployeeAccessToken, verifyPassword } from "../services/employee-auth-service.js";
-import { isSmtpConfigured } from "../services/mailer-transport.js";
+import { isEmailConfigured } from "../services/mailer-transport.js";
 import {
   completeEmployeePasswordReset,
   requestEmployeePasswordReset
@@ -98,17 +98,26 @@ export async function registerAuthRoutes(app: FastifyInstance) {
           {
             forgotPasswordOutcome: "email_not_sent",
             reason: result.reason,
-            smtpConfigured: isSmtpConfigured(env)
+            emailConfigured: isEmailConfigured(env)
           },
           "employee-forgot-password: mail was not delivered"
         );
+        const isNotConfigured =
+          result.reason === "Email is not configured." || result.reason === "SMTP is not configured.";
+        const isTimeout = result.reason === "SMTP send timed out";
+        const isIpBlocked = /blocked this server ip|unrecognised ip|authorized_ips|authorised_ips/i.test(
+          result.reason ?? ""
+        );
         return reply.status(503).send({
-          message:
-            result.reason === "SMTP is not configured."
-              ? "Password reset email is not available because outbound email is not configured on this server. Contact your organization administrator."
-              : result.reason === "Email delivery failed." || result.reason === "SMTP send timed out"
+          message: isNotConfigured
+            ? "Password reset email is not available because outbound email is not configured on this server. Contact your organization administrator."
+            : isIpBlocked
+              ? "Unable to send the reset email: Brevo is blocking this server's IP. In Brevo → Security → Authorized IPs, disable the restriction or add your Render server IP."
+              : isTimeout || result.reason === "Email delivery failed."
                 ? "Unable to send the reset email (mail server timeout or connection issue). Try again later or contact your administrator."
-                : "Unable to send the reset email right now. Try again later or contact your administrator."
+                : result.reason && result.reason.length < 220
+                  ? `Unable to send the reset email: ${result.reason}`
+                  : "Unable to send the reset email right now. Try again later or contact your administrator."
         });
       }
 

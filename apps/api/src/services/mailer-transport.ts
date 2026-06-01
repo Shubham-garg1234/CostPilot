@@ -1,42 +1,21 @@
 import nodemailer from "nodemailer";
 import { getEnvConfig } from "../config.js";
+import { isBrevoApiConfigured, sendBrevoTransactionalEmail, type BrevoTransactionalEmail } from "./brevo-mailer.js";
 
 type EnvConfig = ReturnType<typeof getEnvConfig>;
 
-type MailerTransportConfig =
-  | {
-      provider: "internal";
-      service?: string;
-      host?: string;
-      port?: number;
-      secure: boolean;
-      user?: string;
-      pass?: string;
-      from?: string;
-    }
-  | {
-      provider: "brevo";
-      host?: string;
-      port?: number;
-      secure: boolean;
-      user?: string;
-      pass?: string;
-      from?: string;
-    };
+type InternalMailerConfig = {
+  provider: "internal";
+  service?: string;
+  host?: string;
+  port?: number;
+  secure: boolean;
+  user?: string;
+  pass?: string;
+  from?: string;
+};
 
-function getMailerTransportConfig(env: EnvConfig): MailerTransportConfig {
-  if (env.MAIL_PROVIDER === "brevo") {
-    return {
-      provider: "brevo",
-      host: env.BREVO_SMTP_HOST,
-      port: env.BREVO_SMTP_PORT,
-      secure: env.BREVO_SMTP_SECURE,
-      user: env.BREVO_SMTP_USER,
-      pass: env.BREVO_SMTP_PASS,
-      from: env.EMAIL_FROM
-    };
-  }
-
+function getInternalMailerConfig(env: EnvConfig): InternalMailerConfig {
   return {
     provider: "internal",
     service: env.NODEMAILER_SERVICE,
@@ -49,18 +28,29 @@ function getMailerTransportConfig(env: EnvConfig): MailerTransportConfig {
   };
 }
 
-export function isSmtpConfigured(env = getEnvConfig()) {
-  const mailer = getMailerTransportConfig(env);
+function isInternalSmtpConfigured(env: EnvConfig) {
+  const mailer = getInternalMailerConfig(env);
   const hasSmtpHost = Boolean(mailer.host && mailer.port);
-  const hasNodemailerService = mailer.provider === "internal" && Boolean(mailer.service);
+  const hasNodemailerService = Boolean(mailer.service);
   return Boolean((hasSmtpHost || hasNodemailerService) && mailer.user && mailer.pass && mailer.from);
 }
 
+/** True when outbound email can be sent for the active MAIL_PROVIDER. */
+export function isEmailConfigured(env = getEnvConfig()) {
+  if (env.MAIL_PROVIDER === "brevo") {
+    return isBrevoApiConfigured(env);
+  }
+  return isInternalSmtpConfigured(env);
+}
+
+/** @deprecated Use isEmailConfigured */
+export const isSmtpConfigured = isEmailConfigured;
+
 export function createSmtpTransporter(env = getEnvConfig()) {
   const timeoutMs = env.SMTP_TIMEOUT_MS;
-  const mailer = getMailerTransportConfig(env);
+  const mailer = getInternalMailerConfig(env);
 
-  if (mailer.provider === "internal" && mailer.service) {
+  if (mailer.service) {
     return nodemailer.createTransport({
       service: mailer.service,
       auth: {
@@ -105,5 +95,33 @@ export async function sendMailWithTimeout(
     if (timer) {
       clearTimeout(timer);
     }
+  }
+}
+
+export async function sendTransactionalEmail(mail: BrevoTransactionalEmail, env = getEnvConfig()) {
+  if (env.MAIL_PROVIDER === "brevo") {
+    await sendBrevoTransactionalEmail(mail, env);
+    return;
+  }
+
+  if (!env.EMAIL_FROM) {
+    throw new Error("EMAIL_FROM is not configured.");
+  }
+
+  const transporter = createSmtpTransporter(env);
+
+  try {
+    await sendMailWithTimeout(
+      transporter,
+      {
+        from: env.EMAIL_FROM,
+        to: mail.to,
+        subject: mail.subject,
+        text: mail.text
+      },
+      env.SMTP_TIMEOUT_MS
+    );
+  } finally {
+    transporter.close();
   }
 }
