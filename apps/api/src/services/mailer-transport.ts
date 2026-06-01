@@ -2,11 +2,26 @@ import nodemailer from "nodemailer";
 import { getEnvConfig } from "../config.js";
 
 export function isSmtpConfigured(env = getEnvConfig()) {
-  return Boolean(env.SMTP_HOST && env.SMTP_PORT && env.SMTP_USER && env.SMTP_PASS && env.EMAIL_FROM);
+  const hasSmtpHost = Boolean(env.SMTP_HOST && env.SMTP_PORT);
+  const hasNodemailerService = Boolean(env.NODEMAILER_SERVICE);
+  return Boolean((hasSmtpHost || hasNodemailerService) && env.SMTP_USER && env.SMTP_PASS && env.EMAIL_FROM);
 }
 
 export function createSmtpTransporter(env = getEnvConfig()) {
   const timeoutMs = env.SMTP_TIMEOUT_MS;
+
+  if (env.NODEMAILER_SERVICE) {
+    return nodemailer.createTransport({
+      service: env.NODEMAILER_SERVICE,
+      auth: {
+        user: env.SMTP_USER,
+        pass: env.SMTP_PASS
+      },
+      connectionTimeout: timeoutMs,
+      greetingTimeout: timeoutMs,
+      socketTimeout: timeoutMs
+    });
+  }
 
   return nodemailer.createTransport({
     host: env.SMTP_HOST,

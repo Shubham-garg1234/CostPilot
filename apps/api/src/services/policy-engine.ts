@@ -55,34 +55,34 @@ export async function evaluatePolicy(
   }
 
   if (policy.featureLocked) {
-    await createViolation(app, auth, request, policy.actionOnViolation, ViolationType.FEATURE_LOCKED, "Feature is locked for this role.", policy.cooldownMinutes);
+    await createPolicyViolation(app, auth, request, policy.actionOnViolation, ViolationType.FEATURE_LOCKED, "Feature is locked for this role.", policy.cooldownMinutes);
     return toDecision(policy.actionOnViolation, "Feature is locked for this role.");
   }
 
   if (policy.allowedModels.length > 0 && !policy.allowedModels.includes(request.model)) {
-    await createViolation(app, auth, request, policy.actionOnViolation, ViolationType.MODEL_RESTRICTED, "Selected model is not allowed for this role.", policy.cooldownMinutes);
+    await createPolicyViolation(app, auth, request, policy.actionOnViolation, ViolationType.MODEL_RESTRICTED, "Selected model is not allowed for this role.", policy.cooldownMinutes);
     return toDecision(policy.actionOnViolation, "Selected model is not allowed for this role.");
   }
 
   const snapshot = await getUsageSnapshot(app, auth, request.category, request.feature);
 
   if (snapshot.cooldownUntil && snapshot.cooldownUntil > Date.now()) {
-    await createViolation(app, auth, request, ViolationAction.BLOCK, ViolationType.CATEGORY_LOCKED, "Category is temporarily locked due to repeated abuse.", policy.cooldownMinutes);
+    await createPolicyViolation(app, auth, request, ViolationAction.BLOCK, ViolationType.CATEGORY_LOCKED, "Category is temporarily locked due to repeated abuse.", policy.cooldownMinutes);
     return { allowed: false, action: "block", reason: "Category is temporarily locked due to repeated abuse." };
   }
 
   if (policy.maxTokensPerDay !== null && snapshot.tokensUsedToday >= policy.maxTokensPerDay) {
-    await createViolation(app, auth, request, policy.actionOnViolation, ViolationType.TOKEN_LIMIT, "Daily token quota exceeded.", policy.cooldownMinutes);
+    await createPolicyViolation(app, auth, request, policy.actionOnViolation, ViolationType.TOKEN_LIMIT, "Daily token quota exceeded.", policy.cooldownMinutes);
     return toDecision(policy.actionOnViolation, "Daily token quota exceeded.", snapshot.violationCount);
   }
 
   if (policy.maxRequestsPerHour !== null && snapshot.requestsThisHour >= policy.maxRequestsPerHour) {
-    await createViolation(app, auth, request, policy.actionOnViolation, ViolationType.REQUEST_LIMIT, "Hourly request quota exceeded.", policy.cooldownMinutes);
+    await createPolicyViolation(app, auth, request, policy.actionOnViolation, ViolationType.REQUEST_LIMIT, "Hourly request quota exceeded.", policy.cooldownMinutes);
     return toDecision(policy.actionOnViolation, "Hourly request quota exceeded.", snapshot.violationCount);
   }
 
   if (policy.maxCostPerMonthUsd !== null && snapshot.costThisMonthUsd >= Number(policy.maxCostPerMonthUsd)) {
-    await createViolation(app, auth, request, policy.actionOnViolation, ViolationType.COST_LIMIT, "Monthly cost budget exceeded.", policy.cooldownMinutes);
+    await createPolicyViolation(app, auth, request, policy.actionOnViolation, ViolationType.COST_LIMIT, "Monthly cost budget exceeded.", policy.cooldownMinutes);
     return toDecision(policy.actionOnViolation, "Monthly cost budget exceeded.", snapshot.violationCount);
   }
 
@@ -107,7 +107,7 @@ function toDecision(action: ViolationAction, reason: string, violationCount = 0)
   return { allowed: true, action: "throttle", warning: reason, throttleMs };
 }
 
-async function createViolation(
+export async function createPolicyViolation(
   app: FastifyInstance,
   auth: AuthContext,
   request: LlmProxyRequest,

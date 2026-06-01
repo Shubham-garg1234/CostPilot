@@ -8,6 +8,11 @@ import { calculateCost } from "../services/costing.js";
 import { mirrorUsageEventToAnalytics, persistUsageEvent } from "../services/analytics-service.js";
 import { commitUsage } from "../services/usage-counter-service.js";
 import {
+  notifyIfDailyTokenLimitReached,
+  releaseQuotaReservation,
+  reserveDailyTokenQuota
+} from "../services/quota-service.js";
+import {
   integrationTypeValues,
   normalizeIntegrationType,
   normalizeUsageSource,
@@ -15,6 +20,19 @@ import {
   serializeUsageSource,
   usageSourceValues
 } from "../services/usage-source.js";
+
+const quotaPreflightSchema = z.object({
+  prompt: z.string().optional(),
+  model: z.string().min(1),
+  category: z.string().min(1),
+  feature: z.string().optional(),
+  provider: z.enum(["openai", "anthropic", "gemini"]).optional(),
+  estimatedInputTokens: z.number().int().nonnegative().optional(),
+  estimatedOutputTokens: z.number().int().nonnegative().optional(),
+  estimatedTotalTokens: z.number().int().nonnegative().optional(),
+  estimatedCostUsd: z.number().nonnegative().optional(),
+  metadata: z.record(z.unknown()).optional()
+});
 
 const usageEventSchema = z.object({
   model: z.string().min(1),
@@ -26,6 +44,7 @@ const usageEventSchema = z.object({
   workspaceId: z.string().optional(),
   sessionId: z.string().optional(),
   requestId: z.string().optional(),
+  reservationId: z.string().optional(),
   status: z.string().default("success"),
   promptTokens: z.number().int().nonnegative().default(0),
   completionTokens: z.number().int().nonnegative().default(0),
@@ -75,6 +94,29 @@ function buildUsageWhere(orgId: string, options: {
 }
 
 export async function registerUsageEventRoutes(app: FastifyInstance) {
+  app.post("/api/usage-events/preflight", { preHandler: [authenticate] }, async (request, reply) => {
+    const body = quotaPreflightSchema.parse(request.body);
+    const decision = await reserveDailyTokenQuota(app, {
+      auth: request.auth,
+      category: body.category,
+      feature: body.feature,
+      model: body.model,
+      provider: body.provider,
+      prompt: body.prompt,
+      estimatedInputTokens: body.estimatedInputTokens,
+      estimatedOutputTokens: body.estimatedOutputTokens,
+      estimatedTotalTokens: body.estimatedTotalTokens,
+      estimatedCostUsd: body.estimatedCostUsd,
+      metadata: body.metadata
+    });
+
+    if (!decision.allowed) {
+      return reply.status(403).send(decision);
+    }
+
+    return decision;
+  });
+
   app.post("/api/usage-events", { preHandler: [authenticate] }, async (request, reply) => {
     const body = usageEventSchema.parse(request.body);
     const promptTokens = body.promptTokens;
@@ -111,6 +153,17 @@ export async function registerUsageEventRoutes(app: FastifyInstance) {
 
     if (usageEvent) {
       await commitUsage(app, request.auth, body.category, body.feature, totalTokens, costUsd);
+      await releaseQuotaReservation(app, body.reservationId);
+      await notifyIfDailyTokenLimitReached(app, {
+        auth: request.auth,
+        category: body.category,
+        feature: body.feature,
+        model: body.model,
+        provider: body.provider,
+        estimatedTotalTokens: totalTokens,
+        estimatedCostUsd: costUsd,
+        metadata: body.metadata
+      });
     }
 
     return reply.status(201).send({

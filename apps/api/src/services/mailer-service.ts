@@ -39,7 +39,7 @@ export async function sendEmployeeCredentialsEmail(input: {
           `Email: ${input.to}`,
           `Password: ${input.password}`,
           "",
-          "After signing in, you can copy your Cursor MCP configuration directly from the employee dashboard."
+          "After signing in, open the employee dashboard and choose your coding agent to complete CostPilot MCP setup."
         ].join("\n")
       },
       env.SMTP_TIMEOUT_MS
@@ -80,6 +80,88 @@ export async function sendEmployeePasswordResetEmail(input: { to: string; fullNa
       },
       env.SMTP_TIMEOUT_MS
     );
+  } catch (error) {
+    return { delivered: false as const, reason: smtpFailureReason(error) };
+  } finally {
+    transporter.close();
+  }
+
+  return { delivered: true as const };
+}
+
+export async function sendDailyTokenQuotaExhaustedEmails(input: {
+  employee: {
+    email: string;
+    fullName: string;
+    role: string;
+  };
+  organization: {
+    name: string;
+  };
+  heads: Array<{
+    email: string;
+    fullName: string;
+  }>;
+  quota: {
+    category: string;
+    feature?: string | null;
+    limit: number;
+    used: number;
+    requested?: number;
+  };
+}) {
+  const env = getEnvConfig();
+  if (!isSmtpConfigured(env)) {
+    return { delivered: false as const, reason: "SMTP is not configured." };
+  }
+
+  const transporter = createSmtpTransporter(env);
+  const featureText = input.quota.feature ? ` / ${input.quota.feature}` : "";
+  const requestedText = input.quota.requested
+    ? `\nRequested tokens: ${input.quota.requested.toLocaleString("en-US")}`
+    : "";
+
+  try {
+    await sendMailWithTimeout(
+      transporter,
+      {
+        from: env.EMAIL_FROM,
+        to: input.employee.email,
+        subject: "Your CostPilot daily token limit is exhausted",
+        text: [
+          `Hello ${input.employee.fullName},`,
+          "",
+          `Your daily CostPilot token quota for ${input.quota.category}${featureText} has been exhausted.`,
+          `Daily limit: ${input.quota.limit.toLocaleString("en-US")} tokens`,
+          `Used today: ${input.quota.used.toLocaleString("en-US")} tokens${requestedText}`,
+          "",
+          "Further CostPilot-controlled execution for this policy will be blocked until the daily quota resets or your organization updates the policy."
+        ].join("\n")
+      },
+      env.SMTP_TIMEOUT_MS
+    );
+
+    if (input.heads.length > 0) {
+      await sendMailWithTimeout(
+        transporter,
+        {
+          from: env.EMAIL_FROM,
+          to: input.heads.map((head) => head.email).join(","),
+          subject: `${input.employee.fullName} exhausted a CostPilot daily token limit`,
+          text: [
+            `Hello,`,
+            "",
+            `${input.employee.fullName} (${input.employee.email}, ${input.employee.role}) exhausted the daily CostPilot token quota in ${input.organization.name}.`,
+            `Policy scope: ${input.quota.category}${featureText}`,
+            `Daily limit: ${input.quota.limit.toLocaleString("en-US")} tokens`,
+            `Used today: ${input.quota.used.toLocaleString("en-US")} tokens${requestedText}`,
+            "",
+            "CostPilot has blocked further controlled execution for this policy until the quota resets or the policy is updated."
+          ].join("\n")
+        },
+        env.SMTP_TIMEOUT_MS
+      );
+    }
   } catch (error) {
     return { delivered: false as const, reason: smtpFailureReason(error) };
   } finally {

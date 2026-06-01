@@ -36,7 +36,16 @@ export type OrganizationSnapshot = {
     createdAt: string;
   };
   teams: Array<{ id: string; name: string; departmentCode?: string | null; userCount: number }>;
-  users: Array<{ id: string; email: string; name: string; role: RoleKey; teamId?: string | null; hasPassword: boolean }>;
+  users: Array<{
+    id: string;
+    email: string;
+    name: string;
+    role: RoleKey;
+    teamId?: string | null;
+    managerId?: string | null;
+    managerName?: string | null;
+    hasPassword: boolean;
+  }>;
   policies: Array<{
     id: string;
     role: RoleKey;
@@ -81,6 +90,8 @@ export async function getOrganizationSnapshot(app: FastifyInstance, orgId: strin
         name: mapped.fullName,
         role: mapped.role,
         teamId: mapped.teamId,
+        managerId: mapped.managerId,
+        managerName: user.managerName ? String(user.managerName) : null,
         hasPassword: Boolean(mapped.passwordHash)
       };
     }),
@@ -195,6 +206,7 @@ export async function createUserRecord(
     fullName: string;
     role: RoleKey;
     teamId?: string | null;
+    managerId?: string | null;
     clerkUserId?: string;
   }
 ) {
@@ -208,6 +220,19 @@ export async function createUserRecord(
 
     if (!team) {
       throw new Error("Selected team does not belong to the current organization.");
+    }
+  }
+
+  if (input.managerId) {
+    const { findUserById } = await import("../db/users.js");
+    const manager = await findUserById(app.db, input.managerId);
+
+    if (!manager || manager.organizationId !== input.organizationId) {
+      throw new Error("Selected manager does not belong to the current organization.");
+    }
+
+    if (manager.role !== RoleKey.MANAGER && manager.role !== RoleKey.ADMIN) {
+      throw new Error("Selected manager must have MANAGER or ADMIN role.");
     }
   }
 
@@ -225,6 +250,7 @@ export async function createUserRecord(
     fullName: input.fullName,
     role: input.role,
     teamId: input.teamId,
+    managerId: input.managerId ?? null,
     clerkUserId: input.clerkUserId ?? null,
     passwordHash: createPasswordHash(temporaryPassword),
     passwordSetAt: new Date()
@@ -244,6 +270,7 @@ export async function createUserRecord(
     name: user.fullName,
     role: user.role,
     teamId: user.teamId,
+    managerId: user.managerId,
     temporaryPassword,
     emailDelivered: emailResult.delivered,
     emailDeliveryNote: emailResult.delivered ? undefined : emailResult.reason

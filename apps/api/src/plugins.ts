@@ -252,6 +252,9 @@ function createMemoryRedis(): MemoryRedisLike {
   const store = new Map<string, string>();
 
   return {
+    async get(key: string) {
+      return store.get(key) ?? null;
+    },
     async mget(...keys: string[]) {
       return keys.map((key) => store.get(key) ?? null);
     },
@@ -265,12 +268,24 @@ function createMemoryRedis(): MemoryRedisLike {
             store.set(key, String(next));
           });
         },
+        decrby(key, value) {
+          ops.push(() => {
+            const next = Math.max(0, Number(store.get(key) ?? 0) - value);
+            store.set(key, String(next));
+          });
+        },
         expire() {
           return;
         },
         incrbyfloat(key, value) {
           ops.push(() => {
             const next = Number(store.get(key) ?? 0) + value;
+            store.set(key, String(next));
+          });
+        },
+        decrbyfloat(key, value) {
+          ops.push(() => {
+            const next = Math.max(0, Number(store.get(key) ?? 0) - value);
             store.set(key, String(next));
           });
         },
@@ -283,6 +298,11 @@ function createMemoryRedis(): MemoryRedisLike {
         set(key, value) {
           ops.push(() => {
             store.set(key, String(value));
+          });
+        },
+        del(key) {
+          ops.push(() => {
+            store.delete(key);
           });
         },
         async exec() {
@@ -299,6 +319,9 @@ function createMemoryRedis(): MemoryRedisLike {
 
 function createUpstashRedisAdapter(client: UpstashRedis): UpstashRedisLike {
   return {
+    async get(key: string) {
+      return await client.get<string>(key);
+    },
     async mget(...keys: string[]) {
       return await client.mget<string[]>(...keys);
     },
@@ -309,12 +332,20 @@ function createUpstashRedisAdapter(client: UpstashRedis): UpstashRedisLike {
           pipeline.incrby(key, value);
           return this;
         },
+        decrby(key, value) {
+          pipeline.decrby(key, value);
+          return this;
+        },
         expire(key, seconds) {
           pipeline.expire(key, seconds);
           return this;
         },
         incrbyfloat(key, value) {
           pipeline.incrbyfloat(key, value);
+          return this;
+        },
+        decrbyfloat(key, value) {
+          pipeline.incrbyfloat(key, -value);
           return this;
         },
         incr(key) {
@@ -327,6 +358,10 @@ function createUpstashRedisAdapter(client: UpstashRedis): UpstashRedisLike {
             return this;
           }
           pipeline.set(key, value);
+          return this;
+        },
+        del(key) {
+          pipeline.del(key);
           return this;
         },
         async exec() {

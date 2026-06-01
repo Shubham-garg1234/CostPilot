@@ -19,6 +19,8 @@ export function OrganizationManager() {
   const [userEmail, setUserEmail] = useState("rina@northstar.ai");
   const [userRole, setUserRole] = useState("SDE1");
   const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedManagerId, setSelectedManagerId] = useState("");
+  const [userSearch, setUserSearch] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [status, setStatus] = useState("Checking your workspace...");
   const [submitting, setSubmitting] = useState(false);
@@ -59,6 +61,17 @@ export function OrganizationManager() {
     }
 
     setSelectedTeamId((current) => (current && snapshot.teams.some((team) => team.id === current) ? current : snapshot.teams[0]?.id ?? ""));
+  }, [snapshot]);
+
+  useEffect(() => {
+    if (!snapshot?.users.length) {
+      setSelectedManagerId("");
+      return;
+    }
+
+    setSelectedManagerId((current) =>
+      current && snapshot.users.some((user) => user.id === current && isManagerRole(user.role)) ? current : ""
+    );
   }, [snapshot]);
 
   async function refreshOrganization() {
@@ -148,7 +161,8 @@ export function OrganizationManager() {
           teamId: selectedTeamId,
           fullName: userName,
           email: userEmail,
-          role: userRole
+          role: userRole,
+          managerId: selectedManagerId || undefined
         })
       });
       setStatus(
@@ -169,6 +183,17 @@ export function OrganizationManager() {
     ? snapshot.teams.length > 0 || snapshot.users.length > 1 || snapshot.policies.length > 0
     : false;
   const currentSlug = snapshot?.organization.slug ?? (signedOut ? "signed-out" : "no-organization");
+  const managerOptions = snapshot?.users.filter((user) => isManagerRole(user.role)) ?? [];
+  const filteredUsers =
+    snapshot?.users.filter((user) => {
+      const query = userSearch.trim().toLowerCase();
+      if (!query) {
+        return true;
+      }
+
+      return [user.name, user.email, user.role, user.managerName ?? ""].some((value) => value.toLowerCase().includes(query));
+    }) ?? [];
+  const loadingWorkspace = organizationSlice.status === "loading" || submitting;
 
   return (
     <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
@@ -249,9 +274,106 @@ export function OrganizationManager() {
         </div>
       </Card>
 
-      <div className="space-y-6">
+      <div className="order-first space-y-6 xl:order-none">
+        <Card className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-slate-500">Add employee</p>
+              <h2 className="font-display text-2xl font-semibold">Create employee access</h2>
+            </div>
+            {loadingWorkspace ? <Pill tone="warn">Saving...</Pill> : null}
+          </div>
+          {loadingWorkspace ? <LoadingShimmer /> : null}
+          <div className="mt-4 grid gap-3">
+            <input value={userName} onChange={(event) => setUserName(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" placeholder="Employee name" />
+            <input value={userEmail} onChange={(event) => setUserEmail(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" placeholder="employee@company.com" />
+            <label className="grid gap-2 text-sm text-slate-600">
+              <span>Select team</span>
+              <select
+                value={selectedTeamId}
+                onChange={(event) => setSelectedTeamId(event.target.value)}
+                className="rounded-xl border border-black/10 px-3 py-2"
+                disabled={!snapshot?.teams.length}
+              >
+                <option value="">{snapshot?.teams.length ? "Select team" : "Create a team first"}</option>
+                {snapshot?.teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}{team.departmentCode ? ` (${team.departmentCode})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-2 text-sm text-slate-600">
+              <span>Manager</span>
+              <select
+                value={selectedManagerId}
+                onChange={(event) => setSelectedManagerId(event.target.value)}
+                className="rounded-xl border border-black/10 px-3 py-2"
+              >
+                <option value="">{managerOptions.length ? "No manager" : "Add a manager first"}</option>
+                {managerOptions.map((manager) => (
+                  <option key={manager.id} value={manager.id}>
+                    {manager.name} ({manager.role})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <select value={userRole} onChange={(event) => setUserRole(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2">
+              {["ADMIN", "MANAGER", "SDE1", "SDE2", "INTERN"].map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => void createUser()}
+              disabled={!snapshot || !isSignedIn || submitting || userName.trim().length < 2 || !userEmail.includes("@") || !selectedTeamId}
+              className="rounded-full bg-black px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Add User
+            </button>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">Every employee must belong to a team. Manager is optional and can be shared by many employees.</p>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-slate-500">Employees</p>
+              <h2 className="font-display text-2xl font-semibold">Team access</h2>
+            </div>
+            <input
+              value={userSearch}
+              onChange={(event) => setUserSearch(event.target.value)}
+              className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm sm:w-56"
+              placeholder="Search employees"
+            />
+          </div>
+          <div className="mt-5 max-h-[28rem] space-y-2 overflow-y-auto pr-2">
+            {snapshot?.users.length ? (
+              filteredUsers.map((user) => (
+                <div key={user.id} className="rounded-[18px] bg-stone-100 px-4 py-3 text-sm">
+                  <p className="font-medium">{user.name}</p>
+                  <p className="text-slate-500">{user.email} - {user.role} - {user.hasPassword ? "employee login ready" : "password pending"}</p>
+                  <p className="mt-1 text-xs text-slate-500">Manager: {user.managerName ?? "none"}</p>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-[18px] border border-dashed border-black/10 bg-stone-50 px-4 py-4 text-sm text-slate-600">
+                {signedOut ? "Sign in to manage users." : "No users added yet. Invite your first teammate here."}
+              </div>
+            )}
+            {snapshot?.users.length && filteredUsers.length === 0 ? (
+              <div className="rounded-[18px] border border-dashed border-black/10 bg-stone-50 px-4 py-4 text-sm text-slate-600">
+                No employees match your search.
+              </div>
+            ) : null}
+          </div>
+        </Card>
+
         <Card className="p-6">
           <p className="text-sm text-slate-500">Create team</p>
+          {loadingWorkspace ? <LoadingShimmer /> : null}
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_140px_auto]">
             <input value={teamName} onChange={(event) => setTeamName(event.target.value)} className="flex-1 rounded-xl border border-black/10 px-3 py-2" />
             <input
@@ -269,60 +391,20 @@ export function OrganizationManager() {
             </button>
           </div>
         </Card>
-
-        <Card className="p-6">
-          <p className="text-sm text-slate-500">Add employee</p>
-          <div className="mt-4 grid gap-3">
-            <input value={userName} onChange={(event) => setUserName(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" />
-            <input value={userEmail} onChange={(event) => setUserEmail(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" />
-            <label className="grid gap-2 text-sm text-slate-600">
-              <span>Select team</span>
-            <select
-              value={selectedTeamId}
-              onChange={(event) => setSelectedTeamId(event.target.value)}
-              className="rounded-xl border border-black/10 px-3 py-2"
-              disabled={!snapshot?.teams.length}
-            >
-              <option value="">{snapshot?.teams.length ? "Select team" : "Create a team first"}</option>
-              {snapshot?.teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}{team.departmentCode ? ` (${team.departmentCode})` : ""}
-                </option>
-              ))}
-            </select>
-            </label>
-            <select value={userRole} onChange={(event) => setUserRole(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2">
-              {["ADMIN", "MANAGER", "SDE1", "SDE2", "INTERN"].map((role) => (
-                <option key={role} value={role}>
-                  {role}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={() => void createUser()}
-              disabled={!snapshot || !isSignedIn || submitting || userName.trim().length < 2 || !userEmail.includes("@") || !selectedTeamId}
-              className="rounded-full bg-black px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              Add User
-            </button>
-          </div>
-          <p className="mt-3 text-xs text-slate-500">Every employee must belong to a team so reporting and policy ownership stay clean.</p>
-          <div className="mt-5 space-y-2">
-            {snapshot?.users.length ? (
-              snapshot.users.map((user) => (
-                <div key={user.id} className="rounded-[18px] bg-stone-100 px-4 py-3 text-sm">
-                  <p className="font-medium">{user.name}</p>
-                  <p className="text-slate-500">{user.email} - {user.role} - {user.hasPassword ? "employee login ready" : "password pending"}</p>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-[18px] border border-dashed border-black/10 bg-stone-50 px-4 py-4 text-sm text-slate-600">
-                {signedOut ? "Sign in to manage users." : "No users added yet. Invite your first teammate here."}
-              </div>
-            )}
-          </div>
-        </Card>
       </div>
+    </div>
+  );
+}
+
+function isManagerRole(role: string) {
+  return role === "MANAGER" || role === "ADMIN";
+}
+
+function LoadingShimmer() {
+  return (
+    <div className="mt-4 grid gap-2" aria-hidden="true">
+      <div className="h-3 w-2/3 animate-pulse rounded-full bg-black/10" />
+      <div className="h-3 w-1/2 animate-pulse rounded-full bg-black/10" />
     </div>
   );
 }

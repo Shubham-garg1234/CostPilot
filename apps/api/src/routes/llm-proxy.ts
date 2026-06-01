@@ -4,6 +4,12 @@ import { authenticate } from "../auth.js";
 import { calculateCost } from "../services/costing.js";
 import { evaluatePolicy } from "../services/policy-engine.js";
 import { commitUsage } from "../services/usage-counter-service.js";
+import {
+  estimatePromptTokens,
+  notifyIfDailyTokenLimitReached,
+  releaseQuotaReservation,
+  reserveDailyTokenQuota
+} from "../services/quota-service.js";
 import { mirrorUsageEventToAnalytics, persistUsageEvent } from "../services/analytics-service.js";
 import { dispatchAlert } from "../services/notification-service.js";
 import { generateOptimizationHints } from "../services/optimizer-service.js";
@@ -30,12 +36,15 @@ const requestSchema = z.object({
   sessionId: z.string().optional(),
   requestId: z.string().optional(),
   status: z.string().optional(),
+  maxOutputTokens: z.number().int().nonnegative().optional(),
   startedAt: z.string().datetime().optional(),
   completedAt: z.string().datetime().optional()
 });
 
 export async function registerLlmProxyRoutes(app: FastifyInstance) {
   app.post("/api/llm-proxy", { preHandler: [authenticate] }, async (request, reply) => {
+    let reservationId: string | null = null;
+
     try {
       const body = requestSchema.parse(request.body) as LlmProxyRequest;
       const decision = await evaluatePolicy(app, request.auth, body);
@@ -56,6 +65,23 @@ export async function registerLlmProxyRoutes(app: FastifyInstance) {
       }
 
       const provider = body.provider ?? inferProvider(body.model);
+      const quotaDecision = await reserveDailyTokenQuota(app, {
+        auth: request.auth,
+        category: body.category,
+        feature: body.feature,
+        model: body.model,
+        provider,
+        prompt: body.prompt,
+        estimatedInputTokens: estimatePromptTokens(body.prompt),
+        estimatedOutputTokens: body.maxOutputTokens ?? 2_000,
+        metadata: body.metadata
+      });
+
+      if (!quotaDecision.allowed) {
+        return reply.status(403).send(quotaDecision);
+      }
+
+      reservationId = quotaDecision.reservationId;
       const providerResponse = await generateResponse({
         provider,
         model: body.model,
@@ -95,6 +121,19 @@ export async function registerLlmProxyRoutes(app: FastifyInstance) {
 
       if (usageEvent) {
         await commitUsage(app, request.auth, body.category, body.feature, totalTokens, cost.totalCostUsd);
+        await releaseQuotaReservation(app, reservationId);
+        await notifyIfDailyTokenLimitReached(app, {
+          auth: request.auth,
+          category: body.category,
+          feature: body.feature,
+          model: body.model,
+          provider,
+          estimatedTotalTokens: totalTokens,
+          estimatedCostUsd: cost.totalCostUsd,
+          metadata: body.metadata
+        });
+      } else {
+        await releaseQuotaReservation(app, reservationId);
       }
 
       if (usageEvent && (totalTokens > 4000 || cost.totalCostUsd > 0.1)) {
@@ -133,6 +172,8 @@ export async function registerLlmProxyRoutes(app: FastifyInstance) {
         }
       });
     } catch (error) {
+      await releaseQuotaReservation(app, reservationId).catch(() => undefined);
+
       if (error instanceof ProviderError) {
         request.log.warn({ error }, "Upstream provider request failed");
         return reply.status(error.statusCode).send({

@@ -10,7 +10,16 @@ export type DashboardSummary = {
 export type OrganizationSnapshot = {
   organization: { id: string; name: string; slug: string; createdAt: string };
   teams: Array<{ id: string; name: string; departmentCode?: string | null; userCount: number }>;
-  users: Array<{ id: string; email: string; name: string; role: string; teamId?: string | null; hasPassword: boolean }>;
+  users: Array<{
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    teamId?: string | null;
+    managerId?: string | null;
+    managerName?: string | null;
+    hasPassword: boolean;
+  }>;
   policies: Array<{ id: string }>;
 };
 
@@ -23,6 +32,7 @@ export type PolicyRecord = {
   actionOnViolation: string;
   maxRequestsPerHour?: number | null;
   maxTokensPerDay?: number | null;
+  maxCostPerMonthUsd?: number | null;
 };
 
 export type BillingRecord = {

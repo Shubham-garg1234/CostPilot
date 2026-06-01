@@ -95,6 +95,26 @@ async function handleMessage(message: JsonRpcRequest) {
       return writeResult(message.id ?? null, {
         tools: [
           {
+            name: "check_execution_allowed",
+            description: "Reserve daily token quota before substantial work. If blocked, stop and do not continue execution.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                prompt: { type: "string" },
+                model: { type: "string" },
+                provider: { type: "string", enum: ["openai", "anthropic", "gemini"] },
+                category: { type: "string" },
+                feature: { type: "string" },
+                estimatedInputTokens: { type: "number" },
+                estimatedOutputTokens: { type: "number" },
+                estimatedTotalTokens: { type: "number" },
+                estimatedCostUsd: { type: "number" },
+                metadata: { type: "object" }
+              },
+              required: ["model", "category"]
+            }
+          },
+          {
             name: "track_usage_event",
             description: "Record token, cost, category, and source metadata in CostPilot.",
             inputSchema: {
@@ -109,6 +129,7 @@ async function handleMessage(message: JsonRpcRequest) {
                 workspaceId: { type: "string" },
                 sessionId: { type: "string" },
                 requestId: { type: "string" },
+                reservationId: { type: "string" },
                 promptTokens: { type: "number" },
                 completionTokens: { type: "number" },
                 totalTokens: { type: "number" },
@@ -149,7 +170,7 @@ async function handleMessage(message: JsonRpcRequest) {
           },
           {
             name: "enhance_prompt",
-            description: "Tune a raw Cursor prompt into a clearer, implementation-ready prompt using CostPilot's OpenAI-backed enhancer.",
+            description: "Tune a raw coding-agent prompt into a clearer, implementation-ready prompt using CostPilot's OpenAI-backed enhancer.",
             inputSchema: {
               type: "object",
               properties: {
@@ -178,6 +199,13 @@ async function handleToolCall(message: JsonRpcRequest) {
 
   try {
     switch (name) {
+      case "check_execution_allowed": {
+        const result = await apiFetch("/api/usage-events/preflight", {
+          method: "POST",
+          body: JSON.stringify(args)
+        });
+        return writeToolResult(message.id ?? null, result);
+      }
       case "track_usage_event": {
         const result = await apiFetch("/api/usage-events", {
           method: "POST",

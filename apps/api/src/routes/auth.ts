@@ -5,6 +5,7 @@ import { getEnvConfig } from "../config.js";
 import { RoleKey, roleKeyValues } from "../db/types.js";
 import { findUserByEmailInsensitive, findUserWithOrganization } from "../db/index.js";
 import { createEmployeeAccessToken, verifyPassword } from "../services/employee-auth-service.js";
+import { isSmtpConfigured } from "../services/mailer-transport.js";
 import {
   completeEmployeePasswordReset,
   requestEmployeePasswordReset
@@ -14,7 +15,7 @@ import { getOrganizationSnapshot } from "../services/organization-service.js";
 
 const employeeLoginSchema = z.object({
   email: z.string().trim().email(),
-  password: z.string().min(6)
+  password: z.string().min(6, "Password must be at least 6 characters.")
 });
 
 const employeeForgotPasswordSchema = z.object({
@@ -97,9 +98,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
           {
             forgotPasswordOutcome: "email_not_sent",
             reason: result.reason,
-            smtpConfigured: Boolean(
-              env.SMTP_HOST && env.SMTP_PORT && env.SMTP_USER && env.SMTP_PASS && env.EMAIL_FROM
-            )
+            smtpConfigured: isSmtpConfigured(env)
           },
           "employee-forgot-password: mail was not delivered"
         );

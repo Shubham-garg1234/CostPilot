@@ -120,10 +120,10 @@ export async function createOrganizationWithAdminUser(
     await client.query(
       `
         INSERT INTO "User" (
-          "id", "clerkUserId", "email", "fullName", "organizationId", "role", "createdAt", "updatedAt"
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
+          "id", "clerkUserId", "email", "fullName", "organizationId", "managerId", "role", "createdAt", "updatedAt"
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
       `,
-      [userId, input.clerkUserId, input.email, input.fullName, orgId, RoleKey.ADMIN, now]
+      [userId, input.clerkUserId, input.email, input.fullName, orgId, null, RoleKey.ADMIN, now]
     );
     const org = await client.query(`SELECT * FROM "Organization" WHERE "id" = $1`, [orgId]);
     return mapOrganization(org.rows[0]!);
@@ -144,7 +144,16 @@ export async function getOrganizationSnapshotRows(db: Db, orgId: string) {
       `,
       [orgId]
     ),
-    db.query(`SELECT * FROM "User" WHERE "organizationId" = $1 ORDER BY "fullName" ASC`, [orgId]),
+    db.query(
+      `
+        SELECT u.*, m."fullName" AS "managerName"
+        FROM "User" u
+        LEFT JOIN "User" m ON m."id" = u."managerId"
+        WHERE u."organizationId" = $1
+        ORDER BY u."fullName" ASC
+      `,
+      [orgId]
+    ),
     db.query(`SELECT * FROM "Policy" WHERE "orgId" = $1 ORDER BY "role" ASC, "category" ASC`, [orgId])
   ]);
 

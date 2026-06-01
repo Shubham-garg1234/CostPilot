@@ -41,6 +41,7 @@ export function mapUser(row: PgRow): UserRow {
     fullName: String(row.fullName),
     organizationId: String(row.organizationId),
     teamId: row.teamId ? String(row.teamId) : null,
+    managerId: row.managerId ? String(row.managerId) : null,
     role: row.role as UserRow["role"],
     passwordHash: row.passwordHash ? String(row.passwordHash) : null,
     passwordSetAt: row.passwordSetAt ? new Date(row.passwordSetAt as string | Date) : null,

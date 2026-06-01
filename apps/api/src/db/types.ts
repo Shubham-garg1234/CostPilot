@@ -90,6 +90,7 @@ export type UserRow = {
   fullName: string;
   organizationId: string;
   teamId: string | null;
+  managerId: string | null;
   role: RoleKey;
   passwordHash: string | null;
   passwordSetAt: Date | null;

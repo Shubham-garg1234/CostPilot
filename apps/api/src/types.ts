@@ -40,6 +40,7 @@ export type LlmProxyRequest = {
   sessionId?: string;
   requestId?: string;
   status?: string;
+  maxOutputTokens?: number;
   startedAt?: string;
   completedAt?: string;
 };
@@ -67,8 +68,10 @@ export type UsageEventInput = {
 
 export type UsageSnapshot = {
   tokensUsedToday: number;
+  tokensReservedToday: number;
   requestsThisHour: number;
   costThisMonthUsd: number;
+  costReservedThisMonthUsd: number;
   cooldownUntil?: number | null;
   violationCount: number;
 };
@@ -112,13 +115,17 @@ export type AnalyticsWriteResult = {
 };
 
 export type UpstashRedisLike = {
+  get(key: string): Promise<string | null>;
   mget(...keys: string[]): Promise<Array<string | null>>;
   multi(): {
     incrby(key: string, value: number): unknown;
+    decrby(key: string, value: number): unknown;
     expire(key: string, seconds: number): unknown;
     incrbyfloat(key: string, value: number): unknown;
+    decrbyfloat(key: string, value: number): unknown;
     incr(key: string): unknown;
     set(key: string, value: string | number, mode: "EX", seconds: number): unknown;
+    del(key: string): unknown;
     exec(): Promise<unknown[]>;
   };
   quit(): Promise<void>;
@@ -141,13 +148,17 @@ declare module "fastify" {
 }
 
 export type MemoryRedisLike = {
+  get(key: string): Promise<string | null>;
   mget(...keys: string[]): Promise<Array<string | null>>;
   multi(): {
     incrby(key: string, value: number): unknown;
+    decrby(key: string, value: number): unknown;
     expire(key: string, seconds: number): unknown;
     incrbyfloat(key: string, value: number): unknown;
+    decrbyfloat(key: string, value: number): unknown;
     incr(key: string): unknown;
     set(key: string, value: string | number, mode: "EX", seconds: number): unknown;
+    del(key: string): unknown;
     exec(): Promise<unknown[]>;
   };
   quit(): Promise<void>;

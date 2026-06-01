@@ -15,6 +15,13 @@ const optionalEmail = z.preprocess((value) => {
   return value;
 }, z.string().email().optional());
 
+const optionalPositiveInteger = z.preprocess((value) => {
+  if (typeof value === "string" && value.trim() === "") {
+    return undefined;
+  }
+  return value;
+}, z.coerce.number().int().positive().optional());
+
 const envBoolean = z.preprocess((value) => {
   if (typeof value === "boolean") {
     return value;
@@ -60,7 +67,8 @@ export const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   EMPLOYEE_AUTH_SECRET: z.string().min(1).default("employee_auth_dev_secret"),
   SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  NODEMAILER_SERVICE: z.string().optional(),
+  SMTP_PORT: optionalPositiveInteger,
   SMTP_SECURE: envBoolean.default(false),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),

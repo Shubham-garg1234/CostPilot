@@ -14,7 +14,10 @@ export function PolicyManager() {
   const [category, setCategory] = useState("email_generation");
   const [feature, setFeature] = useState("auto_reply");
   const [allowedModels, setAllowedModels] = useState("gpt-4o-mini,gpt-4.1-mini");
-  const [action, setAction] = useState("WARN");
+  const [action, setAction] = useState("BLOCK");
+  const [dailyTokenLimit, setDailyTokenLimit] = useState("10000");
+  const [hourlyRequestLimit, setHourlyRequestLimit] = useState("5");
+  const [monthlyCostLimit, setMonthlyCostLimit] = useState("");
   const [status, setStatus] = useState("Loading policies...");
 
   useEffect(() => {
@@ -52,11 +55,12 @@ export function PolicyManager() {
         body: JSON.stringify({
           role,
           category,
-          feature,
+          feature: feature.trim() || undefined,
           allowedModels: allowedModels.split(",").map((item) => item.trim()).filter(Boolean),
           actionOnViolation: action,
-          maxTokensPerDay: 10000,
-          maxRequestsPerHour: 5,
+          maxTokensPerDay: numberOrNull(dailyTokenLimit),
+          maxRequestsPerHour: numberOrNull(hourlyRequestLimit),
+          maxCostPerMonthUsd: numberOrNull(monthlyCostLimit),
           cooldownMinutes: 15,
           featureLocked: role === "INTERN" && category === "code_generation"
         })
@@ -82,16 +86,19 @@ export function PolicyManager() {
           <Pill tone="warn">Real-time enforcement</Pill>
         </div>
         <p className="mt-4 text-sm text-slate-600">{status}</p>
-        <div className="mt-6 grid gap-3 md:grid-cols-5">
+        <div className="mt-6 grid gap-3 md:grid-cols-4">
           <select value={role} onChange={(event) => setRole(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2">
             {["ADMIN", "MANAGER", "SDE1", "SDE2", "INTERN"].map((entry) => <option key={entry}>{entry}</option>)}
           </select>
-          <input value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" />
-          <input value={feature} onChange={(event) => setFeature(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" />
-          <input value={allowedModels} onChange={(event) => setAllowedModels(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" />
+          <input value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" placeholder="category" />
+          <input value={feature} onChange={(event) => setFeature(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" placeholder="feature or blank" />
           <select value={action} onChange={(event) => setAction(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2">
             {["BLOCK", "WARN", "THROTTLE"].map((entry) => <option key={entry}>{entry}</option>)}
           </select>
+          <input value={dailyTokenLimit} onChange={(event) => setDailyTokenLimit(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" inputMode="numeric" placeholder="daily token limit" />
+          <input value={hourlyRequestLimit} onChange={(event) => setHourlyRequestLimit(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" inputMode="numeric" placeholder="hourly requests" />
+          <input value={monthlyCostLimit} onChange={(event) => setMonthlyCostLimit(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" inputMode="decimal" placeholder="monthly cost USD" />
+          <input value={allowedModels} onChange={(event) => setAllowedModels(event.target.value)} className="rounded-xl border border-black/10 px-3 py-2" placeholder="allowed models" />
         </div>
         <button onClick={() => void createPolicy()} className="mt-4 rounded-full bg-black px-5 py-2 text-sm font-medium text-white">
           Create Policy
@@ -101,7 +108,7 @@ export function PolicyManager() {
       <Card className="p-6">
         <div className="space-y-3">
           {policies.map((policy) => (
-            <div key={policy.id} className="grid gap-3 rounded-[20px] border border-black/10 bg-white/80 px-4 py-4 md:grid-cols-5">
+            <div key={policy.id} className="grid gap-3 rounded-[20px] border border-black/10 bg-white/80 px-4 py-4 md:grid-cols-6">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Role</p>
                 <p className="mt-1 font-medium">{policy.role}</p>
@@ -115,12 +122,16 @@ export function PolicyManager() {
                 <p className="mt-1 font-medium">{policy.feature ?? "all"}</p>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Models</p>
-                <p className="mt-1 font-medium">{policy.allowedModels.join(", ")}</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Daily tokens</p>
+                <p className="mt-1 font-medium">{policy.maxTokensPerDay ? policy.maxTokensPerDay.toLocaleString("en-US") : "none"}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Action</p>
                 <p className="mt-1 font-medium">{policy.actionOnViolation}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Models</p>
+                <p className="mt-1 font-medium">{policy.allowedModels.length ? policy.allowedModels.join(", ") : "all"}</p>
               </div>
             </div>
           ))}
@@ -128,4 +139,14 @@ export function PolicyManager() {
       </Card>
     </div>
   );
+}
+
+function numberOrNull(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 }

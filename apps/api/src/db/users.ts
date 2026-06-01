@@ -26,6 +26,21 @@ export async function findUserByEmailInsensitive(db: Db, email: string): Promise
   return result.rows[0] ? mapUser(result.rows[0]) : null;
 }
 
+export async function listOrganizationHeads(db: Db, orgId: string): Promise<UserRow[]> {
+  const result = await db.query(
+    `
+      SELECT * FROM "User"
+      WHERE "organizationId" = $1 AND "role" IN ('ADMIN', 'MANAGER')
+      ORDER BY
+        CASE "role" WHEN 'ADMIN' THEN 0 WHEN 'MANAGER' THEN 1 ELSE 2 END,
+        "createdAt" ASC
+    `,
+    [orgId]
+  );
+
+  return result.rows.map(mapUser);
+}
+
 export async function findUserForClerkIdentity(
   db: Db,
   input: { clerkUserId: string; primaryEmail?: string }
@@ -51,6 +66,7 @@ export async function createUser(
     fullName: string;
     role: RoleKey;
     teamId?: string | null;
+    managerId?: string | null;
     clerkUserId?: string | null;
     passwordHash?: string | null;
     passwordSetAt?: Date | null;
@@ -62,9 +78,9 @@ export async function createUser(
     `
       INSERT INTO "User" (
         "id", "clerkUserId", "email", "fullName", "organizationId", "teamId",
-        "role", "passwordHash", "passwordSetAt", "createdAt", "updatedAt"
+        "managerId", "role", "passwordHash", "passwordSetAt", "createdAt", "updatedAt"
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
       RETURNING *
     `,
     [
@@ -74,6 +90,7 @@ export async function createUser(
       input.fullName,
       input.organizationId,
       input.teamId ?? null,
+      input.managerId ?? null,
       input.role,
       input.passwordHash ?? null,
       input.passwordSetAt ?? null,

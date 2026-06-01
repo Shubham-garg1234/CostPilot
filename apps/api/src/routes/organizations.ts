@@ -28,6 +28,7 @@ const userSchema = z.object({
   fullName: z.string().min(2),
   role: z.enum(roleKeyValues),
   teamId: z.string().optional(),
+  managerId: z.string().optional(),
   clerkUserId: z.string().optional()
 });
 
@@ -123,6 +124,7 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
           fullName: body.fullName,
           role: body.role,
           teamId: body.teamId,
+          managerId: body.managerId,
           clerkUserId: body.clerkUserId
         })
       );
@@ -132,6 +134,14 @@ export async function registerOrganizationRoutes(app: FastifyInstance) {
       }
 
       if (error instanceof Error && error.message === "Selected team does not belong to the current organization.") {
+        return reply.status(400).send({ message: error.message });
+      }
+
+      if (
+        error instanceof Error &&
+        (error.message === "Selected manager does not belong to the current organization." ||
+          error.message === "Selected manager must have MANAGER or ADMIN role.")
+      ) {
         return reply.status(400).send({ message: error.message });
       }
 

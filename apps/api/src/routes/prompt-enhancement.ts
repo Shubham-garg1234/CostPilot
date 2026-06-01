@@ -6,6 +6,12 @@ import { mirrorUsageEventToAnalytics, persistUsageEvent } from "../services/anal
 import { commitUsage } from "../services/usage-counter-service.js";
 import { enhancePrompt } from "../services/prompt-enhancement-service.js";
 import {
+  estimatePromptTokens,
+  notifyIfDailyTokenLimitReached,
+  releaseQuotaReservation,
+  reserveDailyTokenQuota
+} from "../services/quota-service.js";
+import {
   integrationTypeValues,
   normalizeIntegrationType,
   normalizeUsageSource,
@@ -28,8 +34,27 @@ const promptEnhancementSchema = z.object({
 
 export async function registerPromptEnhancementRoutes(app: FastifyInstance) {
   app.post("/api/prompt-enhancement", { preHandler: [authenticate] }, async (request, reply) => {
+    let reservationId: string | null = null;
+
     try {
       const body = promptEnhancementSchema.parse(request.body);
+      const quotaDecision = await reserveDailyTokenQuota(app, {
+        auth: request.auth,
+        category: "prompt_enhancement",
+        feature: "prompt_tuning",
+        model: body.model ?? "gpt-4o-mini",
+        provider: "openai",
+        prompt: body.prompt,
+        estimatedInputTokens: estimatePromptTokens(body.prompt),
+        estimatedOutputTokens: 1_200,
+        metadata: body.metadata
+      });
+
+      if (!quotaDecision.allowed) {
+        return reply.status(403).send(quotaDecision);
+      }
+
+      reservationId = quotaDecision.reservationId;
       const result = await enhancePrompt(body);
       const source = normalizeUsageSource(body.source ?? "mcp");
       const integrationType = normalizeIntegrationType(body.integrationType ?? "mcp");
@@ -58,6 +83,19 @@ export async function registerPromptEnhancementRoutes(app: FastifyInstance) {
 
       if (usageEvent) {
         await commitUsage(app, request.auth, usagePayload.category, usagePayload.feature, result.totalTokens, result.costUsd);
+        await releaseQuotaReservation(app, reservationId);
+        await notifyIfDailyTokenLimitReached(app, {
+          auth: request.auth,
+          category: usagePayload.category,
+          feature: usagePayload.feature,
+          model: result.model,
+          provider: result.provider,
+          estimatedTotalTokens: result.totalTokens,
+          estimatedCostUsd: result.costUsd,
+          metadata: body.metadata
+        });
+      } else {
+        await releaseQuotaReservation(app, reservationId);
       }
 
       return reply.send({
@@ -74,6 +112,8 @@ export async function registerPromptEnhancementRoutes(app: FastifyInstance) {
         analyticsDetail: analyticsWrite.detail
       });
     } catch (error) {
+      await releaseQuotaReservation(app, reservationId).catch(() => undefined);
+
       if (error instanceof ProviderError) {
         request.log.warn({ error }, "Prompt enhancement provider request failed");
         return reply.status(error.statusCode).send({
