@@ -74,6 +74,11 @@ export function EmployeeLoginForm({ initialNotice }: { initialNotice?: string })
             className="rounded-xl border border-black/10 px-4 py-3"
             placeholder="Password"
           />
+          <div className="-mt-2 flex justify-end">
+            <Link href="/employee/forgot-password" className="text-sm font-medium text-slate-500 underline-offset-4 hover:text-slate-900 hover:underline">
+              Forgot password?
+            </Link>
+          </div>
         </div>
         <p className="mt-4 text-sm text-slate-600">{status}</p>
         <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -89,9 +94,6 @@ export function EmployeeLoginForm({ initialNotice }: { initialNotice?: string })
             className="rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-medium text-slate-700"
           >
             Organization login
-          </Link>
-          <Link href="/employee/forgot-password" className="text-sm font-medium text-slate-600 underline-offset-4 hover:underline">
-            Forgot password?
           </Link>
         </div>
       </Card>
