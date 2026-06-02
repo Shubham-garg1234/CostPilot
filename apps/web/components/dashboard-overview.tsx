@@ -174,6 +174,54 @@ export function DashboardOverview() {
         </Card>
       </section>
 
+      {data.trackingInsights ? (
+        <section className="grid gap-6 xl:grid-cols-3">
+          <Card className="p-6">
+            <p className="text-sm text-slate-500">Tracking health</p>
+            <h2 className="mt-2 font-display text-2xl font-semibold">Failed or blocked events</h2>
+            <p className="mt-4 text-4xl font-semibold">{number(data.trackingInsights.failedOrBlockedCount)}</p>
+            <p className="mt-2 text-sm text-slate-600">
+              Strict tracking blocks: {number(data.trackingInsights.failedTrackingEvents)}
+            </p>
+          </Card>
+          <Card className="p-6">
+            <p className="text-sm text-slate-500">Prompt enhancement</p>
+            <h2 className="mt-2 font-display text-2xl font-semibold">Adoption</h2>
+            <p className="mt-4 text-4xl font-semibold">{data.trackingInsights.promptEnhancementAdoptionPercent}%</p>
+            <p className="mt-2 text-sm text-slate-600">
+              {number(data.trackingInsights.promptEnhancementRequests)} enhancements /{" "}
+              {number(data.trackingInsights.completedAgentTurns)} turns
+            </p>
+          </Card>
+          <Card className="p-6">
+            <p className="text-sm text-slate-500">Sessions</p>
+            <h2 className="mt-2 font-display text-2xl font-semibold">Stale or incomplete</h2>
+            <p className="mt-4 text-4xl font-semibold">{number(data.trackingInsights.staleSessionCount)}</p>
+            <p className="mt-2 text-sm text-slate-600">Sessions with blocks or no completed turns</p>
+          </Card>
+        </section>
+      ) : null}
+
+      {data.trackingInsights?.highestCostSessions.length ? (
+        <Card className="p-6">
+          <p className="text-sm text-slate-500">Admin insights</p>
+          <h2 className="mt-2 font-display text-2xl font-semibold">Highest-cost sessions</h2>
+          <div className="mt-5 space-y-3">
+            {data.trackingInsights.highestCostSessions.map((session) => (
+              <div key={session.sessionId} className="grid gap-3 rounded-[20px] bg-white/75 px-4 py-4 text-sm md:grid-cols-[1fr_auto_auto_auto]">
+                <div>
+                  <p className="font-medium">{session.sessionId}</p>
+                  <p className="text-slate-500">{session.source ?? "unknown source"}</p>
+                </div>
+                <span>{number(session.totalTokens)} tokens</span>
+                <span>{number(session.requestCount)} events</span>
+                <span className="font-medium">{currency(session.costUsd)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
       <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="p-6">
           <div className="mb-5 flex items-center justify-between">
@@ -188,7 +236,7 @@ export function DashboardOverview() {
               <div key={user.id} className="grid gap-3 rounded-[20px] border border-black/10 bg-white/80 px-4 py-4 md:grid-cols-[1.1fr_auto_auto_auto]">
                 <div>
                   <p className="font-medium">{user.name}</p>
-                  <p className="text-sm text-slate-500">{user.role} -+ {user.category}</p>
+                  <p className="text-sm text-slate-500">{user.role} · {user.category}</p>
                 </div>
                 <span className="text-sm text-slate-600">{user.source ?? "sdk"}</span>
                 <span className="text-sm text-slate-600">{number(user.tokens)} tokens</span>
@@ -215,7 +263,7 @@ export function DashboardOverview() {
                 </div>
                 <p className="mt-3 font-medium">{feature.feature}</p>
                 <p className="mt-2 text-sm text-slate-600">
-                  {feature.category} -+ {number(feature.tokens)} tokens -+ {feature.source ?? "all sources"}
+                  {feature.category} · {number(feature.tokens)} tokens · {feature.source ?? "all sources"}
                 </p>
               </div>
             ))}

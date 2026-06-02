@@ -298,6 +298,35 @@ export async function dashboardTopUsageByTokens(db: Db, orgId: string, limit: nu
   return result.rows.map(mapUsageAggregate);
 }
 
+export async function dashboardTopSessionsByCost(db: Db, orgId: string, limit: number) {
+  const result = await db.query(
+    `
+      SELECT
+        "sessionId",
+        MAX(source) AS source,
+        COALESCE(SUM("costUsd"), 0) AS "costUsd",
+        COALESCE(SUM("totalTokens"), 0)::int AS "totalTokens",
+        COUNT(*)::int AS "requestCount",
+        MAX("createdAt") AS "lastSeenAt"
+      FROM "UsageEvent"
+      WHERE "orgId" = $1 AND "sessionId" IS NOT NULL
+      GROUP BY "sessionId"
+      ORDER BY SUM("costUsd") DESC
+      LIMIT $2
+    `,
+    [orgId, limit]
+  );
+
+  return result.rows.map((row) => ({
+    sessionId: String(row.sessionId),
+    source: row.source ?? null,
+    costUsd: row.costUsd,
+    totalTokens: Number(row.totalTokens ?? 0),
+    requestCount: Number(row.requestCount ?? 0),
+    lastSeenAt: new Date(row.lastSeenAt as string | Date)
+  }));
+}
+
 export async function dashboardUsageBySource(db: Db, orgId: string) {
   const result = await db.query(
     `

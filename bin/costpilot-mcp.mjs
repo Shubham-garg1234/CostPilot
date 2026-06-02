@@ -20,8 +20,32 @@ let employeeToken = "";
 
 const tools = [
   {
+    name: "check_execution_allowed",
+    description: "Mandatory before substantive work. Reserve quota; include sessionId and requestId.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        model: { type: "string" },
+        provider: { type: "string", enum: ["openai", "anthropic", "gemini"] },
+        category: { type: "string" },
+        feature: { type: "string" },
+        source: { type: "string" },
+        integrationType: { type: "string" },
+        sessionId: { type: "string" },
+        requestId: { type: "string" },
+        estimatedInputTokens: { type: "number" },
+        estimatedOutputTokens: { type: "number" },
+        estimatedTotalTokens: { type: "number" },
+        estimatedCostUsd: { type: "number" },
+        metadata: { type: "object" }
+      },
+      required: ["model", "category", "sessionId", "requestId"]
+    }
+  },
+  {
     name: "track_usage_event",
-    description: "Record token, cost, category, and source metadata in CostPilot.",
+    description: "Mandatory last step of every assistant turn with exact usage metadata.",
     inputSchema: {
       type: "object",
       properties: {
@@ -34,6 +58,7 @@ const tools = [
         workspaceId: { type: "string" },
         sessionId: { type: "string" },
         requestId: { type: "string" },
+        reservationId: { type: "string" },
         status: { type: "string" },
         promptTokens: { type: "number" },
         completionTokens: { type: "number" },
@@ -43,7 +68,19 @@ const tools = [
         startedAt: { type: "string" },
         completedAt: { type: "string" }
       },
-      required: ["model", "provider", "category"]
+      required: [
+        "model",
+        "provider",
+        "category",
+        "source",
+        "integrationType",
+        "sessionId",
+        "requestId",
+        "promptTokens",
+        "completionTokens",
+        "totalTokens",
+        "costUsd"
+      ]
     }
   },
   {
@@ -77,21 +114,56 @@ const tools = [
   },
   {
     name: "enhance_prompt",
-    description: "Tune a raw Cursor prompt into a clearer, implementation-ready prompt using CostPilot's OpenAI-backed enhancer.",
+    description: "Mandatory for every non-empty user request before substantive work.",
     inputSchema: {
       type: "object",
       properties: {
         prompt: { type: "string" },
-        model: { type: "string", description: "Optional OpenAI model for prompt enhancement." },
-        targetModel: { type: "string", description: "Optional target model or agent that will use the refined prompt." },
-        objective: { type: "string", description: "Optional goal the prompt should optimize for." },
-        context: { type: "string", description: "Optional project or task context to preserve in the refined prompt." },
+        model: { type: "string" },
+        targetModel: { type: "string" },
+        objective: { type: "string" },
+        context: { type: "string" },
+        source: { type: "string" },
+        integrationType: { type: "string" },
+        sessionId: { type: "string" },
+        requestId: { type: "string" },
         metadata: { type: "object" }
       },
-      required: ["prompt"]
+      required: ["prompt", "sessionId", "requestId"]
     }
   }
 ];
+
+function withMcpDefaults(args) {
+  return {
+    integrationType: "mcp",
+    source: typeof args.source === "string" && args.source.trim() ? args.source : "mcp",
+    ...args
+  };
+}
+
+async function recordToolFailure(toolName, args, error) {
+  try {
+    await apiFetch("/api/activity-log/events", {
+      method: "POST",
+      body: JSON.stringify({
+        eventType: "mcp.tool_failed",
+        eventCategory: "tool",
+        status: "failed",
+        outcomeReason: error instanceof Error ? error.message : "Tool call failed",
+        source: typeof args.source === "string" ? args.source : "mcp",
+        integrationType: "mcp",
+        sessionId: typeof args.sessionId === "string" ? args.sessionId : undefined,
+        requestId: typeof args.requestId === "string" ? args.requestId : undefined,
+        subjectType: "mcp_tool",
+        subjectId: toolName,
+        metadata: { tool: toolName, error: error instanceof Error ? error.message : String(error) }
+      })
+    });
+  } catch {
+    // Best-effort audit trail only.
+  }
+}
 
 const server = new Server(
   SERVER_INFO,
@@ -110,11 +182,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
+      case "check_execution_allowed":
+        return createToolResult(
+          await apiFetch("/api/usage-events/preflight", {
+            method: "POST",
+            body: JSON.stringify(withMcpDefaults(args))
+          })
+        );
       case "track_usage_event":
         return createToolResult(
           await apiFetch("/api/usage-events", {
             method: "POST",
-            body: JSON.stringify(args)
+            body: JSON.stringify(withMcpDefaults(args))
           })
         );
       case "get_usage_summary": {
@@ -137,13 +216,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return createToolResult(
           await apiFetch("/api/prompt-enhancement", {
             method: "POST",
-            body: JSON.stringify(args)
+            body: JSON.stringify(withMcpDefaults(args))
           })
         );
       default:
         return createToolError(`Unknown tool: ${name}`);
     }
   } catch (error) {
+    await recordToolFailure(name, args, error);
     const message = error instanceof Error ? error.message : "Tool call failed";
     return createToolError(message);
   }

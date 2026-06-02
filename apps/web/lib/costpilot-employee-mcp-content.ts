@@ -7,37 +7,36 @@ const sharedInstructions = `# CostPilot MCP
 
 Use the costpilot MCP server for this project.
 
-## Required behavior
+## Required turn workflow (every non-empty user request)
 
-1. Before substantive coding, review, debugging, planning, or implementation work, call costpilot.check_execution_allowed with the raw user prompt, category, model, provider if known, and best-effort estimated token usage.
-2. If costpilot.check_execution_allowed returns allowed=false or a blocked status, stop immediately. Do not edit files, run tools, continue planning, or call another model for that task. Tell the user CostPilot blocked execution because the daily token quota is exhausted.
-3. If costpilot.check_execution_allowed returns a reservationId, save it for this turn and include it when calling costpilot.track_usage_event.
-4. Before substantive work, call costpilot.enhance_prompt with the raw user prompt and use the refined prompt as your working prompt.
-5. At the end of every assistant response, call costpilot.track_usage_event before considering the turn complete. This includes short replies, clarifying questions, status updates, and explanations with no file edits.
-6. Use costpilot.get_usage_summary when the user asks about usage, spend, or totals.
-7. Use costpilot.get_budget_status when discussing budgets or limits.
-8. Use costpilot.list_policies before recommending high-token or restricted work.
+1. Pick one stable \`sessionId\` for the conversation and a unique \`requestId\` for each assistant turn.
+2. Call \`costpilot.check_execution_allowed\` with the raw user prompt, category, model, provider if known, sessionId, requestId, source (cursor/claude/codex/copilot), integrationType=mcp, and best-effort token estimates.
+3. If allowed=false or status is blocked, stop immediately and tell the user CostPilot blocked the turn.
+4. Call \`costpilot.enhance_prompt\` with the raw user prompt (mandatory for every non-empty user request). Use the refined prompt for your work.
+5. Do your coding work using the refined prompt.
+6. Call \`costpilot.track_usage_event\` as the last step of every assistant reply with exact provider usage metadata.
 
-## Usage event guidance
+## Strict usage tracking (coding agents)
 
-When exact token or cost data is unavailable, still call track_usage_event with a best-effort estimate and include a metadata note such as "estimated tokens".
+CostPilot rejects MCP usage events that omit exact billing fields. Always send:
 
-Minimum fields:
+- promptTokens, completionTokens, totalTokens (must equal prompt + completion)
+- costUsd (exact, not estimated)
+- provider, model, category, source, integrationType
+- sessionId, requestId
+- metadata.agent with: name, version (if known), sessionId, turnId/requestId, rawProviderUsage, exact=true
 
-- model: the model id/name, or the agent name if unknown
-- provider: openai, anthropic, or gemini
-- category: coding, review, debugging, planning, conversation, or meta
+Never send metadata.agent.exact=false for MCP turns.
 
-Helpful optional fields:
+If exact usage is unavailable, still call track_usage_event with a failed/blocked status note in metadata and report the gap to the user; do not invent token counts.
 
-- promptTokens, completionTokens, totalTokens, costUsd
-- reservationId from check_execution_allowed when one was returned
-- source: cursor, claude-code, copilot, or codex
-- integrationType: mcp
-- feature, workspaceId, sessionId, requestId
-- metadata for any extra context
+## Other tools
 
-If CostPilot auth fails, ask the user to fix the MCP config email/password/API URL. Do not disable tracking.`;
+- costpilot.get_usage_summary — usage and spend questions
+- costpilot.get_budget_status — budgets and limits
+- costpilot.list_policies — before high-token or restricted work
+
+If CostPilot auth fails, ask the user to fix MCP email/password/API URL. Do not disable tracking.`;
 
 export const costpilotCursorRulesMdc = `---
 description: Enforce CostPilot MCP usage for prompt enhancement, usage tracking, budgets, and policies

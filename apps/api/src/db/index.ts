@@ -7,6 +7,7 @@ export * from "./organizations.js";
 export * from "./teams.js";
 export * from "./policies.js";
 export * from "./usage.js";
+export * from "./activity-log.js";
 export * from "./violations.js";
 export * from "./billing.js";
 export * from "./password-resets.js";

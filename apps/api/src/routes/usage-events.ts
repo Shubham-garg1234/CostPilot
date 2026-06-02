@@ -6,12 +6,14 @@ import type { UsageSource } from "../db/types.js";
 import { authenticate } from "../auth.js";
 import { calculateCost } from "../services/costing.js";
 import { mirrorUsageEventToAnalytics, persistUsageEvent } from "../services/analytics-service.js";
+import { recordActivity } from "../services/activity-log-service.js";
 import { commitUsage } from "../services/usage-counter-service.js";
 import {
   notifyIfDailyTokenLimitReached,
   releaseQuotaReservation,
   reserveDailyTokenQuota
 } from "../services/quota-service.js";
+import { isCodingAgentTrackingContext, validateStrictCodingAgentUsage } from "../services/strict-usage-tracking.js";
 import {
   integrationTypeValues,
   normalizeIntegrationType,
@@ -21,7 +23,15 @@ import {
   usageSourceValues
 } from "../services/usage-source.js";
 
-const quotaPreflightSchema = z.object({
+const trackingContextSchema = z.object({
+  source: z.enum(usageSourceValues).optional(),
+  integrationType: z.enum(integrationTypeValues).optional(),
+  workspaceId: z.string().optional(),
+  sessionId: z.string().optional(),
+  requestId: z.string().optional()
+});
+
+const quotaPreflightSchema = trackingContextSchema.extend({
   prompt: z.string().optional(),
   model: z.string().min(1),
   category: z.string().min(1),
@@ -39,8 +49,8 @@ const usageEventSchema = z.object({
   category: z.string().min(1),
   feature: z.string().optional(),
   provider: z.enum(["openai", "anthropic", "gemini"]),
-  source: z.enum(usageSourceValues).default("sdk"),
-  integrationType: z.enum(integrationTypeValues).default("direct"),
+  source: z.enum(usageSourceValues).default("mcp"),
+  integrationType: z.enum(integrationTypeValues).default("mcp"),
   workspaceId: z.string().optional(),
   sessionId: z.string().optional(),
   requestId: z.string().optional(),
@@ -93,9 +103,36 @@ function buildUsageWhere(orgId: string, options: {
   return { sql: clauses.join(" AND "), params };
 }
 
+function activityContext(body: z.infer<typeof trackingContextSchema>) {
+  return {
+    source: body.source ?? "mcp",
+    integrationType: body.integrationType ?? "mcp",
+    workspaceId: body.workspaceId,
+    sessionId: body.sessionId,
+    requestId: body.requestId
+  };
+}
+
 export async function registerUsageEventRoutes(app: FastifyInstance) {
   app.post("/api/usage-events/preflight", { preHandler: [authenticate] }, async (request, reply) => {
     const body = quotaPreflightSchema.parse(request.body);
+    const ctx = activityContext(body);
+
+    await recordActivity(app, {
+      auth: request.auth,
+      eventType: "agent.turn_preflight",
+      eventCategory: "agent",
+      status: "started",
+      ...ctx,
+      metadata: {
+        model: body.model,
+        category: body.category,
+        feature: body.feature,
+        provider: body.provider,
+        ...body.metadata
+      }
+    });
+
     const decision = await reserveDailyTokenQuota(app, {
       auth: request.auth,
       category: body.category,
@@ -111,20 +148,121 @@ export async function registerUsageEventRoutes(app: FastifyInstance) {
     });
 
     if (!decision.allowed) {
+      await recordActivity(app, {
+        auth: request.auth,
+        eventType: "quota.preflight_blocked",
+        eventCategory: "quota",
+        status: "blocked",
+        outcomeReason: decision.reason,
+        ...ctx,
+        metadata: decision
+      });
+      await recordActivity(app, {
+        auth: request.auth,
+        eventType: "agent.turn_blocked",
+        eventCategory: "agent",
+        status: "blocked",
+        outcomeReason: decision.reason,
+        ...ctx,
+        metadata: decision
+      });
       return reply.status(403).send(decision);
     }
+
+    await recordActivity(app, {
+      auth: request.auth,
+      eventType: "quota.preflight_allowed",
+      eventCategory: "quota",
+      status: "success",
+      ...ctx,
+      subjectType: "quota_reservation",
+      subjectId: decision.reservationId,
+      metadata: decision
+    });
 
     return decision;
   });
 
   app.post("/api/usage-events", { preHandler: [authenticate] }, async (request, reply) => {
+    const rawBody = (request.body ?? {}) as Record<string, unknown>;
     const body = usageEventSchema.parse(request.body);
+    const ctx = activityContext(body);
+    const source = normalizeUsageSource(body.source);
+    const integrationType = normalizeIntegrationType(body.integrationType);
+    const serializedSource = serializeUsageSource(source);
+    const serializedIntegration = serializeIntegrationType(integrationType);
+    const strictContext = isCodingAgentTrackingContext(serializedSource, serializedIntegration);
+
     const promptTokens = body.promptTokens;
     const completionTokens = body.completionTokens;
     const totalTokens = body.totalTokens ?? promptTokens + completionTokens;
     const costUsd = body.costUsd ?? calculateCost(body.model, promptTokens, completionTokens).totalCostUsd;
-    const source = normalizeUsageSource(body.source);
-    const integrationType = normalizeIntegrationType(body.integrationType);
+
+    let metadata = body.metadata;
+
+    if (strictContext) {
+      const validation = validateStrictCodingAgentUsage({
+        rawBody,
+        provider: body.provider,
+        model: body.model,
+        source: serializedSource,
+        integrationType: serializedIntegration,
+        sessionId: body.sessionId,
+        requestId: body.requestId,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        costUsd,
+        metadata: body.metadata
+      });
+
+      if (!validation.ok) {
+        await recordActivity(app, {
+          auth: request.auth,
+          eventType: "usage.tracking_blocked",
+          eventCategory: "usage",
+          status: "blocked",
+          outcomeReason: validation.reason,
+          source: serializedSource,
+          integrationType: serializedIntegration,
+          workspaceId: body.workspaceId,
+          sessionId: body.sessionId,
+          requestId: body.requestId,
+          metadata: {
+            missing: validation.missing,
+            model: body.model,
+            provider: body.provider,
+            category: body.category,
+            rawBody
+          }
+        });
+        return reply.status(422).send({
+          message: validation.reason,
+          missing: validation.missing,
+          strict: true
+        });
+      }
+
+      metadata = validation.agentMetadata;
+    }
+
+    await recordActivity(app, {
+      auth: request.auth,
+      eventType: "agent.turn_completed",
+      eventCategory: "agent",
+      status: body.status === "success" ? "success" : "failed",
+      source: serializedSource,
+      integrationType: serializedIntegration,
+      workspaceId: body.workspaceId,
+      sessionId: body.sessionId,
+      requestId: body.requestId,
+      metadata: {
+        model: body.model,
+        provider: body.provider,
+        category: body.category,
+        strict: strictContext
+      }
+    });
 
     const usagePayload = {
       auth: request.auth,
@@ -142,16 +280,38 @@ export async function registerUsageEventRoutes(app: FastifyInstance) {
       completionTokens,
       totalTokens,
       costUsd,
-      metadata: body.metadata,
+      metadata,
       startedAt: body.startedAt ? new Date(body.startedAt) : undefined,
       completedAt: body.completedAt ? new Date(body.completedAt) : undefined
     };
+
     const usageEvent = await persistUsageEvent(app, usagePayload);
     const analyticsWrite = usageEvent
       ? await mirrorUsageEventToAnalytics(app, usagePayload)
       : { persisted: false, status: "skipped" as const, detail: "Duplicate usage event." };
 
     if (usageEvent) {
+      await recordActivity(app, {
+        auth: request.auth,
+        eventType: "usage.event_recorded",
+        eventCategory: "usage",
+        status: "success",
+        source: serializedSource,
+        integrationType: serializedIntegration,
+        workspaceId: body.workspaceId,
+        sessionId: body.sessionId,
+        requestId: body.requestId,
+        subjectType: "usage_event",
+        subjectId: usageEvent.id,
+        metadata: {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          costUsd,
+          exact: strictContext
+        }
+      });
+
       await commitUsage(app, request.auth, body.category, body.feature, totalTokens, costUsd);
       await releaseQuotaReservation(app, body.reservationId);
       await notifyIfDailyTokenLimitReached(app, {
@@ -162,21 +322,35 @@ export async function registerUsageEventRoutes(app: FastifyInstance) {
         provider: body.provider,
         estimatedTotalTokens: totalTokens,
         estimatedCostUsd: costUsd,
-        metadata: body.metadata
+        metadata
+      });
+    } else {
+      await recordActivity(app, {
+        auth: request.auth,
+        eventType: "usage.event_duplicate",
+        eventCategory: "usage",
+        status: "success",
+        source: serializedSource,
+        integrationType: serializedIntegration,
+        workspaceId: body.workspaceId,
+        sessionId: body.sessionId,
+        requestId: body.requestId,
+        metadata: { requestId: body.requestId }
       });
     }
 
     return reply.status(201).send({
       status: usageEvent ? "recorded" : "duplicate",
       usageEventId: usageEvent?.id,
+      strict: strictContext,
       usage: {
         promptTokens,
         completionTokens,
         totalTokens,
         costUsd: Number(costUsd.toFixed(6)),
         recorded: Boolean(usageEvent),
-        source: body.source,
-        integrationType: body.integrationType
+        source: serializedSource,
+        integrationType: serializedIntegration
       },
       analyticsStatus: analyticsWrite.status,
       analyticsDetail: analyticsWrite.detail

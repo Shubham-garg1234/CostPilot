@@ -168,6 +168,29 @@ export type UsageAggregateRow = {
   updatedAt: Date;
 };
 
+export type ActivityLogRow = {
+  id: string;
+  eventType: string;
+  eventCategory: string;
+  status: string;
+  outcomeReason: string | null;
+  orgId: string;
+  userId: string | null;
+  teamId: string | null;
+  role: RoleKey | null;
+  source: string | null;
+  integrationType: string | null;
+  workspaceId: string | null;
+  sessionId: string | null;
+  requestId: string | null;
+  subjectType: string | null;
+  subjectId: string | null;
+  metadata: Record<string, unknown> | null;
+  occurredAt: Date;
+  processedAt: Date;
+  createdAt: Date;
+};
+
 export type ViolationRow = {
   id: string;
   orgId: string;

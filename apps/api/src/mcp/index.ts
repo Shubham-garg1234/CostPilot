@@ -96,7 +96,8 @@ async function handleMessage(message: JsonRpcRequest) {
         tools: [
           {
             name: "check_execution_allowed",
-            description: "Reserve daily token quota before substantial work. If blocked, stop and do not continue execution.",
+            description:
+              "Mandatory before substantive work. Reserve daily token quota; if blocked, stop the turn. Include sessionId and requestId.",
             inputSchema: {
               type: "object",
               properties: {
@@ -105,18 +106,23 @@ async function handleMessage(message: JsonRpcRequest) {
                 provider: { type: "string", enum: ["openai", "anthropic", "gemini"] },
                 category: { type: "string" },
                 feature: { type: "string" },
+                source: { type: "string" },
+                integrationType: { type: "string" },
+                sessionId: { type: "string" },
+                requestId: { type: "string" },
                 estimatedInputTokens: { type: "number" },
                 estimatedOutputTokens: { type: "number" },
                 estimatedTotalTokens: { type: "number" },
                 estimatedCostUsd: { type: "number" },
                 metadata: { type: "object" }
               },
-              required: ["model", "category"]
+              required: ["model", "category", "sessionId", "requestId"]
             }
           },
           {
             name: "track_usage_event",
-            description: "Record token, cost, category, and source metadata in CostPilot.",
+            description:
+              "Mandatory last step of every assistant turn. Record exact token, cost, source, sessionId, requestId, and metadata.agent for strict coding-agent tracking.",
             inputSchema: {
               type: "object",
               properties: {
@@ -136,7 +142,19 @@ async function handleMessage(message: JsonRpcRequest) {
                 costUsd: { type: "number" },
                 metadata: { type: "object" }
               },
-              required: ["model", "provider", "category"]
+              required: [
+                "model",
+                "provider",
+                "category",
+                "source",
+                "integrationType",
+                "sessionId",
+                "requestId",
+                "promptTokens",
+                "completionTokens",
+                "totalTokens",
+                "costUsd"
+              ]
             }
           },
           {
@@ -170,7 +188,8 @@ async function handleMessage(message: JsonRpcRequest) {
           },
           {
             name: "enhance_prompt",
-            description: "Tune a raw coding-agent prompt into a clearer, implementation-ready prompt using CostPilot's OpenAI-backed enhancer.",
+            description:
+              "Mandatory for every non-empty user request before substantive work. Returns a refined prompt via CostPilot's OpenAI-backed enhancer.",
             inputSchema: {
               type: "object",
               properties: {
@@ -179,9 +198,13 @@ async function handleMessage(message: JsonRpcRequest) {
                 targetModel: { type: "string", description: "Optional target model or agent that will use the refined prompt." },
                 objective: { type: "string", description: "Optional goal the prompt should optimize for." },
                 context: { type: "string", description: "Optional project or task context to preserve in the refined prompt." },
+                source: { type: "string" },
+                integrationType: { type: "string" },
+                sessionId: { type: "string" },
+                requestId: { type: "string" },
                 metadata: { type: "object" }
               },
-              required: ["prompt"]
+              required: ["prompt", "sessionId", "requestId"]
             }
           }
         ]
@@ -202,14 +225,14 @@ async function handleToolCall(message: JsonRpcRequest) {
       case "check_execution_allowed": {
         const result = await apiFetch("/api/usage-events/preflight", {
           method: "POST",
-          body: JSON.stringify(args)
+          body: JSON.stringify(withMcpDefaults(args))
         });
         return writeToolResult(message.id ?? null, result);
       }
       case "track_usage_event": {
         const result = await apiFetch("/api/usage-events", {
           method: "POST",
-          body: JSON.stringify(args)
+          body: JSON.stringify(withMcpDefaults(args))
         });
         return writeToolResult(message.id ?? null, result);
       }
@@ -235,7 +258,7 @@ async function handleToolCall(message: JsonRpcRequest) {
       case "enhance_prompt": {
         const result = await apiFetch("/api/prompt-enhancement", {
           method: "POST",
-          body: JSON.stringify(args)
+          body: JSON.stringify(withMcpDefaults(args))
         });
         return writeToolResult(message.id ?? null, result);
       }
@@ -243,7 +266,42 @@ async function handleToolCall(message: JsonRpcRequest) {
         return writeError(message.id ?? null, -32602, `Unknown tool: ${name}`);
     }
   } catch (error) {
+    await recordToolFailure(name, args, error);
     return writeError(message.id ?? null, -32000, error instanceof Error ? error.message : "Tool call failed");
+  }
+}
+
+function withMcpDefaults(args: Record<string, unknown>) {
+  return {
+    integrationType: "mcp",
+    source: typeof args.source === "string" && args.source.trim() ? args.source : "mcp",
+    ...args
+  };
+}
+
+async function recordToolFailure(toolName: string, args: Record<string, unknown>, error: unknown) {
+  try {
+    await apiFetch("/api/activity-log/events", {
+      method: "POST",
+      body: JSON.stringify({
+        eventType: "mcp.tool_failed",
+        eventCategory: "tool",
+        status: "failed",
+        outcomeReason: error instanceof Error ? error.message : "Tool call failed",
+        source: typeof args.source === "string" ? args.source : "mcp",
+        integrationType: "mcp",
+        sessionId: typeof args.sessionId === "string" ? args.sessionId : undefined,
+        requestId: typeof args.requestId === "string" ? args.requestId : undefined,
+        subjectType: "mcp_tool",
+        subjectId: toolName,
+        metadata: {
+          tool: toolName,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      })
+    });
+  } catch {
+    // Best-effort audit trail only.
   }
 }
 

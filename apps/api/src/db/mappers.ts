@@ -1,4 +1,5 @@
 import type {
+  ActivityLogRow,
   BillingRecordRow,
   OrganizationRow,
   PolicyRow,
@@ -123,6 +124,31 @@ export function mapUsageAggregate(row: PgRow): UsageAggregateRow {
     costUsd: String(row.costUsd),
     createdAt: new Date(row.createdAt as string | Date),
     updatedAt: new Date(row.updatedAt as string | Date)
+  };
+}
+
+export function mapActivityLog(row: PgRow): ActivityLogRow {
+  return {
+    id: String(row.id),
+    eventType: String(row.eventType),
+    eventCategory: String(row.eventCategory),
+    status: String(row.status),
+    outcomeReason: row.outcomeReason ? String(row.outcomeReason) : null,
+    orgId: String(row.orgId),
+    userId: row.userId ? String(row.userId) : null,
+    teamId: row.teamId ? String(row.teamId) : null,
+    role: row.role ? (row.role as ActivityLogRow["role"]) : null,
+    source: row.source ? String(row.source) : null,
+    integrationType: row.integrationType ? String(row.integrationType) : null,
+    workspaceId: row.workspaceId ? String(row.workspaceId) : null,
+    sessionId: row.sessionId ? String(row.sessionId) : null,
+    requestId: row.requestId ? String(row.requestId) : null,
+    subjectType: row.subjectType ? String(row.subjectType) : null,
+    subjectId: row.subjectId ? String(row.subjectId) : null,
+    metadata: (row.metadata as Record<string, unknown> | null) ?? null,
+    occurredAt: new Date(row.occurredAt as string | Date),
+    processedAt: new Date(row.processedAt as string | Date),
+    createdAt: new Date(row.createdAt as string | Date)
   };
 }
 

@@ -11,6 +11,7 @@ import { decimalNumber } from "../db/mappers.js";
 import type { UsageSource } from "../db/types.js";
 import { authenticate } from "../auth.js";
 import { serializeUsageSource } from "../services/usage-source.js";
+import { buildTrackingDashboardInsights } from "../services/tracking-dashboard-service.js";
 
 export async function registerDashboardRoutes(app: FastifyInstance) {
   app.get("/api/dashboard/summary", { preHandler: [authenticate] }, async (request, reply) => {
@@ -28,6 +29,11 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       dashboardUsageByProvider(app.db, orgId),
       listRecentViolations(app.db, orgId, 8)
     ]);
+
+    const trackingInsights =
+      request.auth.authMode === "employee"
+        ? null
+        : await buildTrackingDashboardInsights(app.db, orgId, 30);
 
     return {
       metrics: [
@@ -76,7 +82,21 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         tokens: entry.total_tokens ?? 0,
         requests: entry.request_count ?? 0
       })),
-      recentViolations
+      recentViolations,
+      trackingInsights
     };
+  });
+
+  app.get("/api/dashboard/tracking-insights", { preHandler: [authenticate] }, async (request, reply) => {
+    if (!app.db) {
+      return reply.status(503).send({ message: "PostgreSQL is unavailable." });
+    }
+
+    if (request.auth.authMode === "employee") {
+      return reply.status(403).send({ message: "Tracking insights are available to organization admins only." });
+    }
+
+    const days = Number((request.query as { days?: string }).days ?? 30);
+    return buildTrackingDashboardInsights(app.db, request.auth.orgId, Number.isFinite(days) ? days : 30);
   });
 }

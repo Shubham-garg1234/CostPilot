@@ -1,3 +1,30 @@
+export type TrackingDashboardInsights = {
+  rangeDays: number;
+  failedOrBlockedCount: number;
+  failedTrackingEvents: number;
+  promptEnhancementRequests: number;
+  completedAgentTurns: number;
+  promptEnhancementAdoptionPercent: number;
+  staleSessionCount: number;
+  incompleteSessions: Array<{
+    sessionId: string;
+    source: string | null;
+    activityCount: number;
+    failedOrBlockedCount: number;
+    completedTurns: number;
+    stale: boolean;
+  }>;
+  highestCostSessions: Array<{
+    sessionId: string;
+    source: string | null;
+    costUsd: number;
+    totalTokens: number;
+    requestCount: number;
+    lastSeenAt: string;
+  }>;
+  usageBySource: Array<{ source: string; costUsd: number; tokens: number; requests: number }>;
+};
+
 export type DashboardSummary = {
   metrics: Array<{ label: string; value: string; trend: string }>;
   topUsers: Array<{ id: string; name: string; role: string; category: string; costUsd: number; tokens: number; source?: string }>;
@@ -5,6 +32,7 @@ export type DashboardSummary = {
   sourceBreakdown: Array<{ source: string; costUsd: number; tokens: number; requests: number }>;
   providerBreakdown: Array<{ provider: string; costUsd: number; tokens: number; requests: number }>;
   recentViolations: Array<{ id: string; type: string; message: string; createdAt: string; actionTaken: string; role: string }>;
+  trackingInsights: TrackingDashboardInsights | null;
 };
 
 export type OrganizationSnapshot = {
