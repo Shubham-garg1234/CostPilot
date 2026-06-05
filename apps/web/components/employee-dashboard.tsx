@@ -66,7 +66,6 @@ type AgentSetup = {
   name: string;
   description: string;
   setupLabel: string;
-  setupHref?: string;
   configTitle: string;
   configText: string;
   instructionPath: string;
@@ -209,10 +208,6 @@ export function EmployeeDashboard() {
       setPasswordDialogOpen(false);
       setEmployeePassword("");
       showSetupToast("success", `Setup files added for ${verifiedSetup.name}.`);
-
-      if (verifiedSetup.setupHref) {
-        window.location.href = verifiedSetup.setupHref;
-      }
     } catch (error) {
       setSetupStatus("");
       showSetupToast("error", resolveSetupError(error));
@@ -312,7 +307,7 @@ export function EmployeeDashboard() {
                 ))}
               </div>
               <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                One action writes MCP config and agent rules into your selected project. Claude opens with a setup prompt; Codex has no official browser launcher, so files are written locally.
+                One action writes MCP config and agent rules into your selected project folder. Restart the agent or refresh MCP servers after setup.
               </div>
             </Card>
 
@@ -593,17 +588,6 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       costpilot: server
     }
   };
-  const cursorSingleServerConfig = JSON.stringify(server);
-  const cursorInstallConfig = toBase64(cursorSingleServerConfig);
-  const cursorInstallUrl = `cursor://anysphere.cursor-deeplink/mcp/install?name=costpilot&config=${encodeURIComponent(cursorInstallConfig)}`;
-  const vsCodeInstallConfig = {
-    name: "costpilot",
-    type: server.type,
-    command: server.command,
-    args: server.args,
-    env: server.env
-  };
-  const vsCodeInstallUrl = `vscode:mcp/install?${encodeURIComponent(JSON.stringify(vsCodeInstallConfig))}`;
   const claudeCommand = [
     "claude mcp add --transport stdio --scope user",
     `--env COSTPILOT_API_URL=${shellQuote(server.env.COSTPILOT_API_URL)}`,
@@ -617,24 +601,13 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
   const claudeProjectConfig = JSON.stringify({ mcpServers: { costpilot: server } }, null, 2);
   const codexConfig = toCodexToml(server);
   const commonRules = costpilotAgentInstructionsMarkdown;
-  const claudeLaunchPrompt = [
-    "Set up CostPilot MCP for this project.",
-    "",
-    "1. Run this command after replacing paste-your-password-here with my employee password:",
-    claudeCommand,
-    "",
-    "2. Create or update CLAUDE.md with the CostPilot MCP instructions from the dashboard.",
-    "3. Run /mcp and confirm the costpilot server is connected."
-  ].join("\n");
-  const claudeLaunchUrl = `claude-cli://open?q=${encodeURIComponent(claudeLaunchPrompt)}`;
 
   return [
     {
       key: "cursor",
       name: "Cursor",
-      description: "Writes Cursor MCP config and project rules, then opens Cursor's MCP install flow when supported.",
+      description: "Writes Cursor MCP config and project rules into your repo.",
       setupLabel: "Complete Cursor setup",
-      setupHref: cursorInstallUrl,
       configTitle: ".cursor/mcp.json",
       configText: JSON.stringify(fullCursorConfig, null, 2),
       instructionPath: ".cursor/rules/costpilot-mcp.mdc",
@@ -646,8 +619,8 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       ],
       steps: [
         "Click Complete setup, enter your employee password, and choose your repo folder.",
-        "CostPilot writes mcp.json, .cursor/mcp.json, .cursor/rules/costpilot-mcp.mdc, and rules.md.",
-        "Approve the Cursor setup prompt if it appears, then restart Cursor or refresh MCP servers."
+        "CostPilot writes .cursor/mcp.json, .cursor/rules/costpilot-mcp.mdc, and rules.md.",
+        "Restart Cursor or refresh MCP servers."
       ],
       verify: "Open Cursor Agent and confirm the costpilot tools are listed under available MCP tools.",
       docsHref: "https://docs.cursor.com/context/mcp"
@@ -655,9 +628,8 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
     {
       key: "claude",
       name: "Claude Code",
-      description: "Writes Claude project MCP config and instructions, then opens Claude Code with a prefilled setup prompt.",
+      description: "Writes Claude project MCP config and instructions into your repo.",
       setupLabel: "Complete Claude Code setup",
-      setupHref: claudeLaunchUrl,
       configTitle: "Claude Code command",
       configText: `${claudeCommand}\n\nManual project config alternative:\n${claudeProjectConfig}`,
       instructionPath: "CLAUDE.md",
@@ -669,8 +641,8 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       ],
       steps: [
         "Click Complete setup, enter your employee password, and choose your repo folder.",
-        "CostPilot writes mcp.json, .mcp.json, CLAUDE.md, and rules.md.",
-        "Claude opens with the setup prompt; press Enter there if it asks for confirmation."
+        "CostPilot writes .mcp.json, CLAUDE.md, and rules.md.",
+        "Restart Claude Code or start a new session in that project."
       ],
       verify: "Run claude mcp list or open /mcp inside Claude Code and confirm costpilot is connected.",
       docsHref: "https://code.claude.com/docs/en/mcp"
@@ -678,9 +650,8 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
     {
       key: "copilot",
       name: "GitHub Copilot",
-      description: "Writes VS Code MCP config and Copilot instructions, then opens VS Code's MCP install flow when supported.",
+      description: "Writes VS Code MCP config and Copilot instructions into your repo.",
       setupLabel: "Complete GitHub Copilot setup",
-      setupHref: vsCodeInstallUrl,
       configTitle: ".vscode/mcp.json",
       configText: copilotConfig,
       instructionPath: ".github/copilot-instructions.md",
@@ -692,8 +663,8 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       ],
       steps: [
         "Click Complete setup, enter your employee password, and choose your repo folder.",
-        "CostPilot writes mcp.json, .vscode/mcp.json, .github/copilot-instructions.md, and rules.md.",
-        "Approve the VS Code setup prompt if it appears, then enable costpilot in Copilot Agent mode."
+        "CostPilot writes .vscode/mcp.json, .github/copilot-instructions.md, and rules.md.",
+        "Restart VS Code or refresh MCP servers, then enable costpilot in Copilot Agent mode."
       ],
       verify: "Run MCP: List Servers from the Command Palette and confirm costpilot is running.",
       docsHref: "https://code.visualstudio.com/docs/copilot/reference/mcp-configuration"
@@ -714,21 +685,13 @@ function buildAgentSetups(cursorConfig: CursorMcpConfig, employeePassword = "pas
       ],
       steps: [
         "Click Complete setup, enter your employee password, and choose your repo folder.",
-        "CostPilot writes mcp.json, .codex/config.toml, AGENTS.md, and rules.md.",
+        "CostPilot writes .codex/config.toml, AGENTS.md, and rules.md.",
         "Restart Codex or start a new Codex session in that project."
       ],
       verify: "Run codex mcp list or open /mcp in Codex and confirm costpilot is connected.",
       docsHref: "https://platform.openai.com/docs/docs-mcp"
     }
   ];
-}
-
-function toBase64(value: string) {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return window.btoa(value);
 }
 
 function shellQuote(value: string) {
